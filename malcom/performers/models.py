@@ -223,6 +223,9 @@ class PerformerSocialLink(TimestampedModel):
     platform = models.CharField(max_length=50)
     platform_id = models.CharField(max_length=255, blank=True, default="")
     url = models.URLField(max_length=255, blank=True, default="")
+    verified_datetime = models.DateTimeField(
+        blank=True, null=True, default=None, help_text="Date and time when the PerformerSocialLink is verified"
+    )
 
 
 class PerformerMember(TimestampedModel):

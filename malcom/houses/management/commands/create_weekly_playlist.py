@@ -3,6 +3,7 @@ Creates a WeeklyPlaylist for a given target_week.
 
 This command:
 1. Selects the top N Performers performing in the target week, ordered by playlist_weight (highest first)
+    - exclude performers without a verified YouTube PerformerSocialLink (verified_datetime must be set)
     - exclude performers without a PerformerSong with valid `youtube_video_id` and `youtube_url`
     - exclude songs shorter than MIN_SONG_SELECTION_DURATION_SECONDS (default: 25 seconds)
     - exclude songs longer than MAX_SONG_SELECTION_DURATION_MINUTES (default: 10 minutes)
@@ -31,7 +32,7 @@ from django.db.models import F
 from django.utils import timezone
 from google.auth.transport.requests import Request
 from houses.models import WeeklyPlaylist, WeeklyPlaylistEntry
-from performers.models import Performer, PerformerSong
+from performers.models import Performer, PerformerSocialLink, PerformerSong
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,16 @@ class Command(BaseCommand):
         week_start = target_date
         week_end = week_start + timedelta(days=7)
 
+        # Get IDs of performers who have a verified YouTube social link
+        performers_with_verified_youtube = (
+            PerformerSocialLink.objects.filter(
+                platform="youtube",
+                verified_datetime__isnull=False,
+            )
+            .values_list("performer_id", flat=True)
+            .distinct()
+        )
+
         # Get IDs of performers who have at least one valid YouTube song
         performers_with_songs = (
             PerformerSong.objects.filter(
@@ -216,10 +227,14 @@ class Command(BaseCommand):
         )
 
         # Get eligible performers ordered by playlist_weight who:
-        # 1. Have at least one YouTube song
-        # 2. Are scheduled to perform in the target week
+        # 1. Have a verified YouTube social link
+        # 2. Have at least one YouTube song
+        # 3. Are scheduled to perform in the target week
         eligible_performers = list(
             Performer.objects.filter(
+                id__in=performers_with_verified_youtube,
+            )
+            .filter(
                 id__in=performers_with_songs,
                 performance_schedules__performance_date__gte=week_start,
                 performance_schedules__performance_date__lt=week_end,
@@ -231,7 +246,9 @@ class Command(BaseCommand):
         if not eligible_performers:
             week_str = target_date.strftime("%Y-%m-%d")
             self.stderr.write(
-                self.style.ERROR(f"No performers with YouTube songs scheduled for week starting {week_str} found")
+                self.style.ERROR(
+                    f"No performers with verified YouTube links and songs scheduled for week starting {week_str} found"
+                )
             )
             return
 
@@ -282,9 +299,13 @@ class Command(BaseCommand):
             return
 
         if len(selected_songs) < top_n:
-            self.stdout.write(
-                self.style.WARNING(f"Only {len(selected_songs)} unique performers/songs found (expected {top_n})"),
+            self.stderr.write(
+                self.style.ERROR(
+                    f"Cannot create playlist: only {len(selected_songs)} performers with verified YouTube links "
+                    f"found (need {top_n}). Verify more performer YouTube links to continue."
+                )
             )
+            return
 
         if dry_run:
             self.stdout.write(self.style.SUCCESS("\n=== DRY RUN - No changes made ==="))

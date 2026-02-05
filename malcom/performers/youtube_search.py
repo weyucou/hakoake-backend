@@ -173,9 +173,13 @@ class YouTubeSearcher:
                     title_runs = video.get("title", {}).get("runs", [])
                     title = title_runs[0].get("text", "") if title_runs else ""
 
-                    # Extract channel name
+                    # Extract channel name and ID
                     channel_runs = video.get("ownerText", {}).get("runs", [])
                     channel_name = channel_runs[0].get("text", "") if channel_runs else ""
+                    channel_id = ""
+                    if channel_runs:
+                        browse_endpoint = channel_runs[0].get("navigationEndpoint", {}).get("browseEndpoint", {})
+                        channel_id = browse_endpoint.get("browseId", "")
 
                     # Extract duration
                     duration_text = video.get("lengthText", {}).get("simpleText", "0:00")
@@ -189,6 +193,7 @@ class YouTubeSearcher:
                         "video_id": video_id,
                         "title": title,
                         "channel_name": channel_name,
+                        "channel_id": channel_id,
                         "youtube_url": f"https://www.youtube.com/watch?v={video_id}",
                         "view_count": view_count,
                         "duration_seconds": duration_seconds,
@@ -238,13 +243,15 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
     """
     Search for the top 3 most popular YouTube videos for the performer and create PerformerSong instances.
 
+    Also creates a PerformerSocialLink entry for the YouTube channel if channel_id is available.
+
     Args:
         performer: Performer instance
 
     Returns:
         List of created PerformerSong instances
     """
-    from .models import PerformerSong  # noqa: PLC0415  # Import here to avoid circular imports
+    from .models import PerformerSocialLink, PerformerSong  # noqa: PLC0415
 
     # Check if performer already has songs to avoid duplicates
     if performer.songs.filter(youtube_video_id__isnull=False).exclude(youtube_video_id="").exists():
@@ -259,6 +266,8 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
         return []
 
     created_songs = []
+    channel_created = False
+
     for video_data in videos_data:
         try:
             # Create PerformerSong instance
@@ -274,6 +283,24 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
 
             logger.info(f"Created song for {performer.name}: {song.title}")
             created_songs.append(song)
+
+            # Create PerformerSocialLink for YouTube channel (only once per performer)
+            if not channel_created and video_data.get("channel_id"):
+                channel_id = video_data["channel_id"]
+                channel_url = f"https://www.youtube.com/channel/{channel_id}"
+
+                # Check if YouTube social link already exists
+                existing_link = PerformerSocialLink.objects.filter(performer=performer, platform="youtube").first()
+
+                if not existing_link:
+                    PerformerSocialLink.objects.create(
+                        performer=performer,
+                        platform="youtube",
+                        platform_id=channel_id,
+                        url=channel_url,
+                    )
+                    logger.info(f"Created YouTube social link for {performer.name}: {channel_url}")
+                    channel_created = True
 
         except Exception:  # noqa: BLE001
             logger.exception(f"Failed to create PerformerSong for {performer.name}")

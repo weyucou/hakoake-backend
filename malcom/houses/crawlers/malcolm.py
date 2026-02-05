@@ -234,6 +234,9 @@ class MalcolmCrawler(LiveHouseWebsiteCrawler):
             r"受付.*",
             r"合宿.*",
             r"初日.*",
+            # Date patterns (e.g., "11/15(SAT", "11/16(SUN")
+            r"^\d{1,2}/\d{1,2}\s*\(",  # MM/DD( format
+            r"^\d{1,2}/\d{1,2}\s*$",  # MM/DD only
         ]
 
         for pattern in skip_patterns:

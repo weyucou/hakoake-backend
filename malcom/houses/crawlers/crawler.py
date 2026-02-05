@@ -459,10 +459,11 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                     valid_performers.append(performer)
                     logger.info(f"✅ Validated new performer: {performer_name}")
 
-                except PerformerValidationError as e:
-                    # Log error for failed validation with venue and date context
-                    logger.exception(
-                        f"❌ Skipping performer '{performer_name}' for {live_house.name} on {performance_date}: {e}"  # noqa: TRY401
+                except PerformerValidationError:
+                    # Log error for failed validation with venue and date context (no traceback needed)
+                    logger.error(  # noqa: TRY400
+                        f"❌ Skipping performer '{performer_name}' for "
+                        f"[{live_house.id}] {live_house.name} on {performance_date}"
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.exception(
@@ -880,6 +881,19 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             r"入場時別途",  # Drink charge info
             r"start|open|door",  # Event timing (English)
             r"^(予約|料金|時間|開場|開演)$",  # Event info (Japanese)
+            # Date patterns (e.g., "11/15(SAT", ".04(Sat)")
+            r"^\d{1,2}/\d{1,2}\s*\(",  # MM/DD( format
+            r"^\.\d{1,2}\s*\(",  # .DD( format
+            # Phone numbers (Japanese formats)
+            r"^0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}",  # 03-1234-5678, 050-1234-5678
+            r"^\d{2,4}-\d{3,4}-\d{4}",  # Generic phone pattern
+            # Ticket/sale text
+            r"ticket\s+(on\s+)?sale",  # "Ticket on sale"
+            r"(前売|当日).*(発売|販売)",  # Ticket sale Japanese
+            # Contact info patterns
+            r"^(月～|火～|水～|木～|金～|土～|日～)",  # Business hours start
+            r"日曜.*除く",  # "Excluding Sundays"
+            r"祝\s*日",  # "Holidays"
         ]
 
         for pattern in invalid_patterns:
@@ -1165,9 +1179,18 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             logger.debug(f"Failed to update performer from band info: {str(e)}")
 
     def _update_performer_social_links(self, performer: Performer, social_links: list[dict]) -> None:
-        """Update performer with discovered social media links."""
+        """Update performer with discovered social media links.
+
+        Note: YouTube links are skipped here as they are populated more accurately
+        from youtube_search.search_and_create_performer_songs() which extracts
+        the channel ID directly from YouTube's data.
+        """
         try:
             for link_info in social_links:
+                # Skip YouTube links - these are handled by youtube_search module
+                if link_info["platform"] == "youtube":
+                    continue
+
                 # Check if this social link already exists
                 existing_link = PerformerSocialLink.objects.filter(
                     performer=performer, platform=link_info["platform"], platform_id=link_info["platform_id"]
