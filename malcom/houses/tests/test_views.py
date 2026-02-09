@@ -36,15 +36,17 @@ class PerformanceScheduleViewTest(TestCase):
         )
 
         # Create performance schedules for current month
-        current_date = timezone.now().date()
+        # Use the 5th of the current month to ensure performance2 stays in the same month
+        current_date = timezone.now().date().replace(day=5)
         self.performance1 = PerformanceSchedule.objects.create(
             live_house=self.live_house, performance_date=current_date, open_time=time(18, 30), start_time=time(19, 0)
         )
         self.performance1.performers.add(self.performer1, self.performer2)
 
+        # Use day 10 to ensure it stays in current month
         self.performance2 = PerformanceSchedule.objects.create(
             live_house=self.live_house,
-            performance_date=current_date + timedelta(days=5),
+            performance_date=current_date.replace(day=10),
             open_time=time(19, 0),
             start_time=time(19, 30),
         )
@@ -636,7 +638,8 @@ class TicketInformationTest(TestCase):
 
         self.assertIsNone(ticket_info.ticket_contact_email)
         self.assertIsNone(ticket_info.ticket_contact_phone)
-        self.assertIsNone(ticket_info.ticket_url)
+        # ticket_url defaults to empty string, not None (blank=True but no null=True)
+        self.assertEqual(ticket_info.ticket_url, "")
         self.assertIsNone(ticket_info.ticket_price)
         self.assertIsNone(ticket_info.ticket_sales_start_date)
         self.assertIsNone(ticket_info.ticket_sales_end_date)
@@ -697,12 +700,16 @@ class ViewIntegrationTest(TestCase):
             )
 
         # Create performances with various configurations
-        current_date = timezone.now().date()
+        # Use dates that are guaranteed to be in the current month and future
+        # Get the first day of next month, then add days from there
+        today = timezone.now().date()
+        next_month_start = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+        current_month_future = next_month_start  # Start of next month
 
-        # Performance with full ticket info
+        # Performance with full ticket info (next month day 5)
         perf1 = PerformanceSchedule.objects.create(
             live_house=self.live_house,
-            performance_date=current_date + timedelta(days=5),
+            performance_date=current_month_future.replace(day=5),
             open_time=time(18, 0),
             start_time=time(18, 30),
         )
@@ -717,10 +724,10 @@ class ViewIntegrationTest(TestCase):
             ticket_sales_start_date=timezone.now() + timedelta(hours=1),
         )
 
-        # Performance with minimal ticket info
+        # Performance with minimal ticket info (next month day 15)
         perf2 = PerformanceSchedule.objects.create(
             live_house=self.live_house,
-            performance_date=current_date + timedelta(days=15),
+            performance_date=current_month_future.replace(day=15),
             open_time=time(19, 0),
             start_time=time(19, 30),
         )
@@ -730,10 +737,10 @@ class ViewIntegrationTest(TestCase):
             performance=perf2, ticket_url="https://eventbrite.com/e/integration2"
         )
 
-        # Performance without ticket info
+        # Performance without ticket info (next month day 20)
         perf3 = PerformanceSchedule.objects.create(
             live_house=self.live_house,
-            performance_date=current_date + timedelta(days=25),
+            performance_date=current_month_future.replace(day=20),
             open_time=time(17, 30),
             start_time=time(18, 0),
         )
@@ -741,25 +748,22 @@ class ViewIntegrationTest(TestCase):
 
     def test_complete_user_journey(self):
         """Test complete user journey through all views."""
-        current_date = timezone.now().date()
+        # Get the next month date (where performances are scheduled)
+        today = timezone.now().date()
+        next_month = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
 
-        # 1. Start at current month view
-        current_url = reverse("houses:schedule_current")
-        response = self.client.get(current_url)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "統合テストハウス")
-
-        # 2. Navigate to specific month
-        month_url = reverse("houses:schedule_month", kwargs={"year": current_date.year, "month": current_date.month})
+        # 1. Navigate to next month view (where performances are)
+        month_url = reverse("houses:schedule_month", kwargs={"year": next_month.year, "month": next_month.month})
         response = self.client.get(month_url)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "統合テストハウス")
 
         # Check statistics
         self.assertEqual(response.context["total_performances"], 3)
         self.assertEqual(response.context["total_venues"], 1)
         self.assertEqual(response.context["total_performers"], 3)
 
-        # 3. Click on performer to view details
+        # 2. Click on performer to view details
         performer = self.performers[0]
         performer_url = reverse("houses:performer_detail", kwargs={"performer_id": performer.id})
         response = self.client.get(performer_url)

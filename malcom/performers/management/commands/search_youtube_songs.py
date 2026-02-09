@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand, CommandParser
-from performers.models import Performer
+
+from performers.models import Performer, PerformerSocialLink
 from performers.youtube_search import search_and_create_performer_songs
 
 
@@ -74,8 +75,9 @@ class Command(BaseCommand):
             self.stdout.write(f"🔍 Searching YouTube for: {performer.name} (ID: {performer.id})")
 
             try:
-                # Set flag to skip YouTube search in save method to avoid duplicate searches
-                performer._skip_youtube_search = True
+                # Check if performer had YouTube link before
+                had_youtube_link = PerformerSocialLink.objects.filter(performer=performer, platform="youtube").exists()
+
                 songs = search_and_create_performer_songs(performer)
 
                 if songs:
@@ -84,6 +86,15 @@ class Command(BaseCommand):
                         self.stdout.write(
                             self.style.SUCCESS(f"      {i}. {song.title} ({song.youtube_view_count:,} views)")
                         )
+
+                    # Check if YouTube social link was created
+                    if not had_youtube_link:
+                        youtube_link = PerformerSocialLink.objects.filter(
+                            performer=performer, platform="youtube"
+                        ).first()
+                        if youtube_link:
+                            self.stdout.write(self.style.SUCCESS(f"      📺 YouTube channel: {youtube_link.url}"))
+
                     success_count += 1
                 else:
                     self.stdout.write("   ❌ No suitable videos found")

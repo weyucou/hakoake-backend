@@ -2,7 +2,7 @@ import logging
 import re
 from abc import ABC
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urljoin
 
 import requests
@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from performers.models import Performer, PerformerSocialLink
+from performers.normalization import find_existing_performer
 from pykakasi import kakasi
 
 from ..definitions import CrawlerCollectionState, WebsiteProcessingState
@@ -23,8 +24,8 @@ MIN_LIVEHOUSE_CAPACITY = 50  # noqa: N806
 MAX_LIVEHOUSE_CAPACITY = 350  # noqa: N806
 MIN_TICKET_PRICE = 500  # noqa: N806
 MAX_TICKET_PRICE = 20000  # noqa: N806
-MIN_YEAR = 2024  # noqa: N806
-MAX_YEAR = 2026  # noqa: N806
+YEAR_LOOKBACK = 1  # noqa: N806
+YEAR_LOOKAHEAD = 1  # noqa: N806
 MONTHS_PER_YEAR = 12  # noqa: N806
 MAX_DAYS_PER_MONTH = 31  # noqa: N806
 MAX_SCHEDULES_PER_FETCH = 20  # noqa: N806
@@ -35,6 +36,45 @@ HTTP_SUCCESS = 200  # noqa: N806
 MAX_SOCIAL_LINKS = 5  # noqa: N806
 MAX_CONTEXT_CHARS = 200  # noqa: N806
 MAX_PERFORMERS_IN_CONTEXT = 3  # noqa: N806
+
+
+def parse_japanese_time(time_str: str) -> tuple[time | None, int]:
+    """
+    Parse time strings including Japanese late-night notation (24:00+).
+
+    Japanese venues use times like '24:00' (midnight), '25:00' (1am), etc.
+    to indicate late-night shows continuing past midnight.
+
+    Returns:
+        Tuple of (time, days_offset) where days_offset is the number of days
+        to add to the associated date. Returns (None, 0) if parsing fails.
+
+    Examples:
+        '18:30' -> (time(18, 30), 0)
+        '24:00' -> (time(0, 0), 1)   # midnight next day
+        '25:30' -> (time(1, 30), 1)  # 1:30 AM next day
+    """
+    if not time_str or not isinstance(time_str, str):
+        return None, 0
+
+    time_str = time_str.strip()
+    match = re.match(r"^(\d{1,2}):(\d{2})$", time_str)
+    if not match:
+        return None, 0
+
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+
+    # Calculate days offset for hours >= 24
+    days_offset = hour // 24
+    hour = hour % 24
+
+    try:
+        parsed_time = datetime.strptime(f"{hour:02d}:{minute:02d}", "%H:%M").time()  # noqa: DTZ007
+    except ValueError:
+        return None, 0
+    else:
+        return parsed_time, days_offset
 
 
 class PerformerValidationError(ValueError):
@@ -88,12 +128,12 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         """Main method to run the crawler for a specific website."""
         logger.info(f"Starting crawler for: {self.website.url}")
 
-        with transaction.atomic():
-            # Update state to in_progress
-            self.website.state = WebsiteProcessingState.IN_PROGRESS
-            self.website.save()
+        # Update state to in_progress (outside transaction so it persists)
+        self.website.state = WebsiteProcessingState.IN_PROGRESS
+        self.website.save()
 
-            try:
+        try:
+            with transaction.atomic():
                 # Fetch main page
                 logger.debug(f"Fetching main page: {self.website.url}")
                 main_page_content = self.fetch_page(self.website.url)
@@ -125,29 +165,22 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                 live_house.last_collection_state = CrawlerCollectionState.SUCCESS
                 live_house.save()
 
-                # Update state to completed
-                self.website.state = WebsiteProcessingState.COMPLETED
-                self.website.save()
-                logger.info(f"Successfully completed crawling: {self.website.url}")
+            # Update state to completed (outside transaction so it persists)
+            self.website.state = WebsiteProcessingState.COMPLETED
+            self.website.save()
+            logger.info(f"Successfully completed crawling: {self.website.url}")
 
-            except requests.Timeout:
-                # Handle timeout specifically
-                logger.exception(f"Timeout while crawling {self.website.url}")
-                if "live_house" in locals():
-                    live_house.last_collection_state = CrawlerCollectionState.TIMEOUT
-                    live_house.save()
-                self.website.state = WebsiteProcessingState.FAILED
-                self.website.save()
-                raise
-            except Exception:  # noqa: BLE001
-                # Handle all other errors
-                logger.exception(f"Error while crawling {self.website.url}")
-                if "live_house" in locals():
-                    live_house.last_collection_state = CrawlerCollectionState.ERROR
-                    live_house.save()
-                self.website.state = WebsiteProcessingState.FAILED
-                self.website.save()
-                raise
+        except requests.Timeout:
+            # Handle timeout specifically (outside transaction so state persists)
+            logger.exception(f"Timeout while crawling {self.website.url}")
+            self.website.state = WebsiteProcessingState.FAILED
+            self.website.save()
+
+        except Exception:  # noqa: BLE001
+            # Handle all other errors (outside transaction so state persists)
+            logger.exception(f"Error while crawling {self.website.url}")
+            self.website.state = WebsiteProcessingState.FAILED
+            self.website.save()
 
     def fetch_page(self, url: str) -> str:
         """Fetch the content of a page from the given URL."""
@@ -238,9 +271,13 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         """
         Find the link to the schedule page.
 
-        Default implementation looks for common schedule-related keywords.
-        Subclasses can override for site-specific logic.
+        First checks the schedule_url field on the website model.
+        Falls back to generic HTML-based schedule link discovery.
+        Subclasses can override for site-specific logic (e.g. dynamic date-based URLs).
         """
+        if self.website.schedule_url:
+            logger.debug(f"Using stored schedule_url: {self.website.schedule_url}")
+            return self.website.schedule_url
         return self._generic_find_schedule_link(html_content)
 
     def extract_performance_schedules(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912, PLR0915, PLR0911
@@ -302,11 +339,18 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         logger.debug(f"Next month URL: {next_month_url}")
 
         if next_month_url:
-            logger.debug(f"Fetching next month page: {next_month_url}")
-            next_month_content = self.fetch_page(next_month_url)
-            next_month_schedules = self.extract_performance_schedules(next_month_content)
-            logger.info(f"Extracted {len(next_month_schedules)} schedules from next month")
-            schedules.extend(next_month_schedules)
+            try:
+                logger.debug(f"Fetching next month page: {next_month_url}")
+                next_month_content = self.fetch_page(next_month_url)
+                next_month_schedules = self.extract_performance_schedules(next_month_content)
+                logger.info(f"Extracted {len(next_month_schedules)} schedules from next month")
+                schedules.extend(next_month_schedules)
+            except requests.HTTPError as e:
+                logger.warning(f"Failed to fetch next month page (HTTP {e.response.status_code}): {next_month_url}")
+                logger.debug("Continuing with current month schedules only")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Error fetching next month page: {e}")
+                logger.debug("Continuing with current month schedules only")
 
         logger.info(f"Creating {len(schedules)} performance schedule records")
         # Create PerformanceSchedule instances
@@ -360,17 +404,26 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
 
         open_time = data["open_time"]
         if isinstance(open_time, str):
-            open_time = datetime.strptime(open_time, "%H:%M").time()  # noqa: DTZ007
+            open_time, _ = parse_japanese_time(open_time)
+            if open_time is None:
+                logger.warning(f"Unparsable open_time value: '{data['open_time']}' - setting to None")
 
         start_time = data["start_time"]
+        start_time_days_offset = 0
         if isinstance(start_time, str):
-            start_time = datetime.strptime(start_time, "%H:%M").time()  # noqa: DTZ007
+            start_time, start_time_days_offset = parse_japanese_time(start_time)
+            if start_time is None:
+                logger.warning(f"Unparsable start_time value: '{data['start_time']}' - setting to None")
+
+        # Adjust performance_date if start_time was >= 24:00 (e.g., '24:00' means next day)
+        if start_time_days_offset > 0:
+            performance_date = performance_date + timedelta(days=start_time_days_offset)
 
         # Process and validate performers BEFORE any database operations
         performer_names = data.get("performers", [])
         if isinstance(performer_names, str):
             # Split by common delimiters
-            performer_names = re.split(r"[,、/]", performer_names)
+            performer_names = re.split(r"[,、/／]", performer_names)
             performer_names = [name.strip() for name in performer_names if name.strip()]
 
         # Filter and clean performer names
@@ -383,8 +436,8 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         # Validate all performers and collect valid ones BEFORE database operations
         valid_performers = []
         for performer_name in clean_performer_names:
-            # Check if performer already exists
-            existing_performer = Performer.objects.filter(name=performer_name).first()
+            # Check if performer already exists (normalized lookup)
+            existing_performer = find_existing_performer(performer_name)
             if existing_performer:
                 # Existing performer, assume it's already validated
                 valid_performers.append(existing_performer)
@@ -411,10 +464,11 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                     valid_performers.append(performer)
                     logger.info(f"✅ Validated new performer: {performer_name}")
 
-                except PerformerValidationError as e:
-                    # Log error for failed validation with venue and date context
-                    logger.exception(
-                        f"❌ Skipping performer '{performer_name}' for {live_house.name} on {performance_date}: {e}"  # noqa: TRY401
+                except PerformerValidationError:
+                    # Log error for failed validation with venue and date context (no traceback needed)
+                    logger.error(  # noqa: TRY400
+                        f"❌ Skipping performer '{performer_name}' for "
+                        f"[{live_house.id}] {live_house.name} on {performance_date}"
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.exception(
@@ -445,28 +499,33 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         # Save new performers and add all valid performers to the schedule
         for performer in valid_performers:
             if performer.pk is None:  # New performer not yet saved
-                # Use get_or_create to avoid UNIQUE constraint failures on name_romaji
-                # If a performer with the same romaji exists, use that one instead
-                defaults = {
-                    "name": performer.name,
-                    "name_kana": performer.name_kana,
-                }
-                # Add website if it's set on the performer object
-                if hasattr(performer, "website") and performer.website:
-                    defaults["website"] = performer.website
-
-                existing_performer, created = Performer.objects.get_or_create(
-                    name_romaji=performer.name_romaji, defaults=defaults
-                )
-                if created:
-                    logger.info(f"✅ Created performer in database: {existing_performer.name}")
+                # Try normalized match before falling back to get_or_create on romaji
+                matched = find_existing_performer(performer.name)
+                if matched:
+                    performer = matched  # noqa: PLW2901
                 else:
-                    logger.info(
-                        f"ℹ️ Using existing performer with same romaji: {existing_performer.name} "
-                        f"(requested: {performer.name}, romaji: {performer.name_romaji})"
+                    # Use get_or_create to avoid UNIQUE constraint failures on name_romaji
+                    # If a performer with the same romaji exists, use that one instead
+                    defaults = {
+                        "name": performer.name,
+                        "name_kana": performer.name_kana,
+                    }
+                    # Add website if it's set on the performer object
+                    if hasattr(performer, "website") and performer.website:
+                        defaults["website"] = performer.website
+
+                    existing_performer, created = Performer.objects.get_or_create(
+                        name_romaji=performer.name_romaji, defaults=defaults
                     )
-                # Use the existing performer for the schedule
-                performer = existing_performer  # noqa: PLW2901
+                    if created:
+                        logger.info(f"✅ Created performer in database: {existing_performer.name}")
+                    else:
+                        logger.info(
+                            f"ℹ️ Using existing performer with same romaji: {existing_performer.name} "
+                            f"(requested: {performer.name}, romaji: {performer.name_romaji})"
+                        )
+                    # Use the existing performer for the schedule
+                    performer = existing_performer  # noqa: PLW2901
             performance.performers.add(performer)
 
         # Extract and create/update ticket information from the context
@@ -499,7 +558,7 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                 r"[〒]\s*(\d{3}-\d{4})\s*([^0-9\n]{10,50})",
                 r"住所[：:\s]*([^0-9\n]{10,50})",
                 r"Address[：:\s]*([^0-9\n]{10,50})",
-                r"東京都[^0-9\n]{5,40}",
+                r"(東京都[^0-9\n]{5,40})",
             ]
 
             for pattern in address_patterns:
@@ -507,8 +566,11 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                 if match:
                     if len(match.groups()) > 1:
                         existing_livehouse.address = match.group(2).strip()
-                    else:
+                    elif len(match.groups()) == 1:
                         existing_livehouse.address = match.group(1).strip()
+                    else:
+                        # No capturing groups, use entire match
+                        existing_livehouse.address = match.group(0).strip()
                     break
 
         # Try to find phone number if not set
@@ -605,7 +667,9 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             r"(\d{4})-(\d{1,2})-(\d{1,2})",
         ]
 
-        current_year = 2025  # Default year
+        today = timezone.localdate()
+        current_year = today.year
+        current_month = today.month
         found_dates = set()
 
         for pattern in date_patterns:
@@ -615,9 +679,15 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
 
                 if len(groups) == 3:  # Year, month, day  # noqa: PLR2004
                     year, month, day = groups
-                elif len(groups) == 2:  # Month, day (use current year)  # noqa: PLR2004
+                elif len(groups) == 2:  # Month, day (infer year)  # noqa: PLR2004
                     month, day = groups
-                    year = str(current_year)
+                    month_int = int(month)
+                    # If current month is late in the year and parsed month is early,
+                    # assume it belongs to next year (e.g. December page showing January dates)
+                    if current_month >= 11 and month_int <= 2:  # noqa: PLR2004
+                        year = str(current_year + 1)
+                    else:
+                        year = str(current_year)
                 else:
                     continue
 
@@ -627,7 +697,9 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                     day_int = int(day)
 
                     # Validate date ranges
-                    if 2024 <= year_int <= 2026 and 1 <= month_int <= 12 and 1 <= day_int <= 31:  # noqa: PLR2004
+                    min_year = current_year - YEAR_LOOKBACK
+                    max_year = current_year + YEAR_LOOKAHEAD
+                    if min_year <= year_int <= max_year and 1 <= month_int <= 12 and 1 <= day_int <= 31:  # noqa: PLR2004
                         date_str = f"{year_int}-{month_int:02d}-{day_int:02d}"
                         if date_str not in found_dates:
                             found_dates.add(date_str)
@@ -787,6 +859,12 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         if not name:
             return ""
 
+        # Strip BOM and whitespace
+        name = name.strip("\ufeff")
+
+        # Strip "and more" suffixes
+        name = re.sub(r"\s*(?:\.{0,3}|…)\s*and\s+more.*$", "", name, flags=re.IGNORECASE)
+
         # Remove common prefixes/suffixes that aren't part of performer names
         name = name.strip()
 
@@ -829,6 +907,28 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             r"入場時別途",  # Drink charge info
             r"start|open|door",  # Event timing (English)
             r"^(予約|料金|時間|開場|開演)$",  # Event info (Japanese)
+            # Date patterns (e.g., "11/15(SAT", ".04(Sat)")
+            r"^\d{1,2}/\d{1,2}\s*\(",  # MM/DD( format
+            r"^\.\d{1,2}\s*\(",  # .DD( format
+            # Phone numbers (Japanese formats)
+            r"^0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}",  # 03-1234-5678, 050-1234-5678
+            r"^\d{2,4}-\d{3,4}-\d{4}",  # Generic phone pattern
+            # Ticket/sale text
+            r"ticket\s+(on\s+)?sale",  # "Ticket on sale"
+            r"(前売|当日).*(発売|販売)",  # Ticket sale Japanese
+            # Contact info patterns
+            r"^(月～|火～|水～|木～|金～|土～|日～)",  # Business hours start
+            r"日曜.*除く",  # "Excluding Sundays"
+            r"祝\s*日",  # "Holidays"
+            # URLs and file paths
+            r"https?://",  # URLs
+            r"\.(html|php|do|aspx|jsp)(\b|$)",  # File extensions
+            r"^\d+[_/]\w+",  # Path-like strings
+            r"^and\s+more",  # Bare "and more" entries
+            # Japanese junk text
+            r"チケット.*(予約|購入|はこちら|コチラ)",  # Ticket purchase text
+            # Instrument/role prefixes
+            r"^(FOOD|Vocals|Guitar|Bass|Drums)[＞>：:]",
         ]
 
         for pattern in invalid_patterns:
@@ -1114,21 +1214,27 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             logger.debug(f"Failed to update performer from band info: {str(e)}")
 
     def _update_performer_social_links(self, performer: Performer, social_links: list[dict]) -> None:
-        """Update performer with discovered social media links."""
+        """Update performer with discovered social media links.
+
+        Note: YouTube links are skipped here as they are populated more accurately
+        from youtube_search.search_and_create_performer_songs() which extracts
+        the channel ID directly from YouTube's data.
+        """
         try:
             for link_info in social_links:
-                # Check if this social link already exists
-                existing_link = PerformerSocialLink.objects.filter(
-                    performer=performer, platform=link_info["platform"], platform_id=link_info["platform_id"]
-                ).first()
+                # Skip YouTube links - these are handled by youtube_search module
+                if link_info["platform"] == "youtube":
+                    continue
 
-                if not existing_link:
-                    PerformerSocialLink.objects.create(
-                        performer=performer,
-                        platform=link_info["platform"],
-                        platform_id=link_info["platform_id"],
-                        url=link_info["url"],
-                    )
+                _, created = PerformerSocialLink.objects.get_or_create(
+                    performer=performer,
+                    platform=link_info["platform"],
+                    defaults={
+                        "platform_id": link_info["platform_id"],
+                        "url": link_info["url"],
+                    },
+                )
+                if created:
                     logger.debug(f"Added {link_info['platform']} link for {performer.name}: {link_info['url']}")
 
         except Exception as e:  # noqa: BLE001

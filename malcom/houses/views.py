@@ -104,7 +104,7 @@ def performer_detail_view(request: HttpRequest, performer_id: int) -> HttpRespon
 
         return render(request, "performers/detail.html", context)
 
-    except LiveHouse.DoesNotExist:  # noqa: DJ012
+    except Performer.DoesNotExist:  # noqa: DJ012
         raise Http404("Performer not found")  # noqa: B904
 
 

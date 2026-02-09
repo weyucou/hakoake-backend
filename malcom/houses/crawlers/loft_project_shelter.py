@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from .crawler import CrawlerRegistry, LiveHouseWebsiteCrawler
 
@@ -91,48 +91,83 @@ class LoftProjectShelterCrawler(LiveHouseWebsiteCrawler):
                     info["opened_date"] = f"{year}-{month:02d}-01"
                     break
 
-    def find_schedule_link(self, html_content: str) -> str | None:
-        """Find the link to the schedule page on Loft Project site."""
-        soup = self.create_soup(html_content)
-
-        # The URL already points to the schedule page
-        if "/schedule/" in self.website.url:
-            return self.website.url
-
-        # Look for schedule link
-        schedule_links = soup.find_all("a", href=re.compile(r"/schedule/"))
-        for link in schedule_links:
-            href = link.get("href")
-            if href:
-                return urljoin(self.website.url, href)
-
-        # Alternative text-based search
-        schedule_text_links = soup.find_all("a", text=re.compile(r"スケジュール|schedule|ライブ", re.IGNORECASE))
-        for link in schedule_text_links:
-            href = link.get("href")
-            if href:
-                return urljoin(self.website.url, href)
-
-        return self.website.url  # Assume current page has schedule
-
     def extract_performance_schedules(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """Extract performance schedules from Loft Project Shelter schedule page."""
         soup = self.create_soup(html_content)
         schedules = []
 
-        # Find schedule containers
-        schedule_containers = soup.find_all(
-            ["div", "article", "section"], class_=re.compile(r"schedule|event|live|gig", re.IGNORECASE)
-        )
-        if not schedule_containers:
-            schedule_containers = [soup]
+        # Find event links - each event is wrapped in an <a> tag with schedule URL
+        event_links = soup.find_all("a", href=re.compile(r"/schedule/shelter/\d+"))
 
-        # Process each container
-        for container in schedule_containers:
-            container_schedules = self._process_schedule_container(container)
-            schedules.extend(container_schedules)
+        for link in event_links:
+            schedule = self._parse_event_link(link)
+            if schedule:
+                schedules.append(schedule)
+
+        # Fallback to container-based parsing if no event links found
+        if not schedules:
+            schedule_containers = soup.find_all(
+                ["div", "article", "section"], class_=re.compile(r"schedule|event|live|gig", re.IGNORECASE)
+            )
+            if not schedule_containers:
+                schedule_containers = [soup]
+
+            for container in schedule_containers:
+                container_schedules = self._process_schedule_container(container)
+                schedules.extend(container_schedules)
 
         return schedules
+
+    def _parse_event_link(self, link: Tag) -> dict | None:
+        """Parse a single event link element to extract schedule data."""
+        divs = link.find_all("div", recursive=False)
+        if len(divs) < 4:  # noqa: PLR2004
+            # Try nested structure
+            divs = link.find_all("div")
+
+        # Extract date components (YYYY, MM, DD pattern)
+        year, month, day = None, None, None
+        for div in divs:
+            text = div.get_text(strip=True)
+            if re.match(r"^\d{4}$", text):
+                year = int(text)
+            elif re.match(r"^\d{1,2}$", text) and year and not month:
+                month = int(text)
+            elif re.match(r"^\d{1,2}$", text) and month and not day:
+                day = int(text)
+
+        if not all([year, month, day]):
+            return None
+
+        # Extract times from OPEN/START pattern
+        open_time = "18:00"
+        start_time = "18:30"
+        link_text = link.get_text()
+        time_match = re.search(r"OPEN\s*(\d{1,2}:\d{2})\s*[-–]\s*START\s*(\d{1,2}:\d{2})", link_text, re.IGNORECASE)
+        if time_match:
+            open_time = time_match.group(1)
+            start_time = time_match.group(2)
+
+        # Extract performers from <ul><li> structure
+        performers = []
+        ul_elements = link.find_all("ul")
+        for ul in ul_elements:
+            for li in ul.find_all("li"):
+                performer_name = li.get_text(strip=True)
+                if performer_name and self._is_valid_performer_name(performer_name):
+                    cleaned = self._clean_performer_name(performer_name)
+                    if cleaned and len(cleaned) <= 100:  # noqa: PLR2004
+                        performers.append(cleaned)
+
+        if not performers:
+            return None
+
+        return {
+            "date": f"{year}-{month:02d}-{day:02d}",
+            "open_time": open_time,
+            "start_time": start_time,
+            "performers": performers[:10],
+        }
 
     def _process_schedule_container(self, container: BeautifulSoup) -> list[dict]:  # noqa: PLR0912
         """Process a single schedule container to extract events."""
@@ -329,9 +364,16 @@ class LoftProjectShelterCrawler(LiveHouseWebsiteCrawler):
             r"Digital\s+Single",
             r"1st\s+ALBUM",
             r"NEW\s+ALBUM",
-            r"TOUR\s+2025",
+            r"(Japan\s+)?Tour\s+\d{4}",  # Tour 2024, Japan Tour 2026, etc.
             r"vol\.\s*\d+",
             r"#\d+",
+            r"Shimokitazawa\s+SHELTER",  # Venue name
+            r"SHELTER\s+pre\.",  # SHELTER presents
+            r"高校生.*無料",  # High school students free
+            r"入場無料",  # Free entry
+            r"軽音",  # Light music (club reference)
+            r"吹部歓迎",  # Brass band welcome
+            r"sans\s*visage",  # Common concatenation issue
         ]
 
         for pattern in shelter_noise:
@@ -374,6 +416,11 @@ class LoftProjectShelterCrawler(LiveHouseWebsiteCrawler):
                 r"birthday|anniversary|記念",
                 r"festival|フェス",
                 r"limited|限定",
+                r"tour\s+\d{4}",  # Tour 2024, Tour 2026
+                r"japan\s+tour",  # Japan Tour
+                r"feels\s+real",  # Event title fragment
+                r"Dawn",  # Event name fragment
+                r"^.{50,}$",  # Skip very long strings (likely event titles)
             ]
 
             is_valid = True

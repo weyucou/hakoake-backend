@@ -173,11 +173,18 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 WHITENOISE_STATIC_PREFIX = "/static/"  # noqa: N806
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
 STATICFILES_DIRS = []
+
+# Media files (user uploads)
+MEDIA_URL = f"{URL_PREFIX}/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 
 DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO")
@@ -238,6 +245,7 @@ CSRF_USE_SESSIONS = bool(strtobool(os.getenv("DJANGO_CSRF_USE_SESSIONS", DEFAULT
 
 
 AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
+LOGIN_URL = "/admin/login/"
 # AWS boto3 service endpoints
 DEFAULT_BOTO3_S3_SERVICE_ENDPOINT = f"https://s3.{AWS_REGION}.amazonaws.com"
 AWS_SERVICE_ENDPOINTS = {
@@ -282,7 +290,12 @@ EDGE_TTS_SAMPLE_RATE = 16000  # Sample rate for digital artifacts
 
 IMAGE_GENERATION_MODEL = "llava"
 
-# Playlist song selection - maximum duration for songs to be eligible
+# Playlist song selection - duration limits for songs to be eligible
+DEFAULT_MIN_SONG_SELECTION_DURATION_SECONDS = 25
+MIN_SONG_SELECTION_DURATION_SECONDS = int(
+    os.getenv("MIN_SONG_SELECTION_DURATION_SECONDS", DEFAULT_MIN_SONG_SELECTION_DURATION_SECONDS)
+)
+
 DEFAULT_MAX_SONG_SELECTION_DURATION_MINUTES = 10
 MAX_SONG_SELECTION_DURATION_MINUTES = int(
     os.getenv("MAX_SONG_SELECTION_DURATION_MINUTES", DEFAULT_MAX_SONG_SELECTION_DURATION_MINUTES)

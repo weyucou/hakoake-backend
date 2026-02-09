@@ -22,11 +22,6 @@ class AntiknockCrawler(LiveHouseWebsiteCrawler):
     - Performer extraction from event titles and descriptions
     """
 
-    def find_schedule_link(self, html_content: str) -> str | None:
-        """Find the schedule link for antiknock website."""
-        # antiknock schedule is at /schedule/
-        return urljoin(self.base_url, "/schedule/")
-
     def extract_performance_schedules(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912, PLR0915
         """
         Extract performance schedules from antiknock's schedule page.

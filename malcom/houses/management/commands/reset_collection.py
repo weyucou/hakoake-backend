@@ -2,6 +2,7 @@ from datetime import datetime
 
 from django.core.management import BaseCommand
 from django.db import transaction
+from houses.definitions import CrawlerCollectionState
 from houses.models import LiveHouse, PerformanceSchedule
 
 
@@ -81,8 +82,9 @@ class Command(BaseCommand):
             # Delete schedules
             deleted_count, _ = schedules_to_delete.delete()
 
-            # Reset venue last_collected_datetime
+            # Reset venue collection state
             venue.last_collected_datetime = None
+            venue.last_collection_state = CrawlerCollectionState.PENDING
             venue.save()
 
             self.stdout.write(

@@ -38,6 +38,7 @@ class Command(BaseCommand):
 
         Songs are filtered by:
         - Must have YouTube view count data
+        - Duration must be >= MIN_SONG_SELECTION_DURATION_SECONDS (default: 25 seconds)
         - Duration must be <= MAX_SONG_SELECTION_DURATION_MINUTES (default: 10 minutes)
         - Must not already be in any playlist
 
@@ -102,13 +103,16 @@ class Command(BaseCommand):
         songs_in_playlists = MonthlyPlaylistEntry.objects.values_list("song_id", flat=True)
 
         # Get performer's songs not yet in any playlist, ordered by view count (most popular first)
+        # Exclude songs shorter than MIN_SONG_SELECTION_DURATION_SECONDS
         # Exclude songs longer than MAX_SONG_SELECTION_DURATION_MINUTES
+        min_duration_seconds = settings.MIN_SONG_SELECTION_DURATION_SECONDS
         max_duration_seconds = settings.MAX_SONG_SELECTION_DURATION_MINUTES * 60
         available_songs = (
             PerformerSong.objects.filter(performer=performer)
             .exclude(id__in=songs_in_playlists)
             .filter(
                 youtube_view_count__isnull=False,  # Only songs with view count data
+                youtube_duration_seconds__gte=min_duration_seconds,  # Exclude songs that are too short
                 youtube_duration_seconds__lte=max_duration_seconds,  # Exclude songs that are too long
             )
             .order_by("-youtube_view_count")

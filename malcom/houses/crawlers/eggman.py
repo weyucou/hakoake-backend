@@ -103,12 +103,6 @@ class EggmanCrawler(LiveHouseWebsiteCrawler):
 
         return info
 
-    def find_schedule_link(self, html_content: str) -> str | None:
-        """Find the link to the schedule page."""
-        # For eggman.jp/daytime/, the schedule is at /schedule-cat/daytime/
-        # This is based on the known URL structure
-        return "http://eggman.jp/schedule-cat/daytime/"
-
     def extract_performance_schedules(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """Extract performance schedules from the eggman schedule page."""
         soup = self.create_soup(html_content)

@@ -7,6 +7,7 @@ from .definitions import CrawlerCollectionState, WebsiteProcessingState
 
 class LiveHouseWebsite(TimestampedModel):
     url = models.URLField(max_length=255, unique=True, blank=False, null=False)
+    schedule_url = models.URLField(max_length=255, blank=True, default="")
     state = models.CharField(
         choices=WebsiteProcessingState.choices(), default=WebsiteProcessingState.NOT_STARTED, max_length=20
     )
@@ -45,8 +46,8 @@ class PerformanceSchedule(models.Model):
     live_house = models.ForeignKey(LiveHouse, on_delete=models.CASCADE, related_name="performance_schedules")
     performance_name = models.CharField(max_length=255, blank=True, null=False, default="")
     performance_date = models.DateField()
-    open_time = models.TimeField()
-    start_time = models.TimeField()
+    open_time = models.TimeField(blank=True, null=True)  # noqa: DJ001
+    start_time = models.TimeField(blank=True, null=True)  # noqa: DJ001
     presale_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # noqa: DJ001
     door_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # noqa: DJ001
     performers = models.ManyToManyField(Performer, related_name="performance_schedules", blank=True)
@@ -134,6 +135,32 @@ class MonthlyPlaylistEntry(TimestampedModel):
         if not self.pk and self.position == 1:  # position defaults to 1, so only auto-increment if it's still default
             # get latest position
             latest_entry = MonthlyPlaylistEntry.objects.filter(playlist=self.playlist).order_by("-position").first()
+            if latest_entry:
+                self.position = latest_entry.position + 1
+        super().save(*args, **kwargs)
+
+
+class WeeklyPlaylist(TimestampedModel):
+    date = models.DateField(verbose_name="target date", unique=True)
+    youtube_playlist_id = models.CharField(max_length=100, blank=True, default="")
+    youtube_playlist_url = models.URLField(max_length=500, blank=True, default="")
+    youtube_channel_url = models.URLField(max_length=500, blank=True, default="")
+
+
+class WeeklyPlaylistEntry(TimestampedModel):
+    playlist = models.ForeignKey(WeeklyPlaylist, on_delete=models.CASCADE)
+    position = models.PositiveIntegerField(default=1)
+    song = models.ForeignKey("performers.PerformerSong", on_delete=models.CASCADE)
+    is_spotlight = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("playlist", "position")
+
+    def save(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        # Only auto-increment position for new entries without an explicit position
+        if not self.pk and self.position == 1:  # position defaults to 1, so only auto-increment if it's still default
+            # get latest position
+            latest_entry = WeeklyPlaylistEntry.objects.filter(playlist=self.playlist).order_by("-position").first()
             if latest_entry:
                 self.position = latest_entry.position + 1
         super().save(*args, **kwargs)

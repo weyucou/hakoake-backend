@@ -228,4 +228,9 @@ CLAUDE.md
 client_secret.json
 secrets.json
 malcom/data/*
+malcom/media/*
 token.pickle
+LIVEHOUSE_ONBOARDING_SPEC.md
+LIVEHOUSE_SEARCH_202602.json
+malcom/staticfiles/
+malcom/staticfiles/*

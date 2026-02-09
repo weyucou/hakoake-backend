@@ -4,7 +4,9 @@ Creates a MonthlyPlaylist for a given target_month.
 This command:
 1. Selects the top 5 Performers performing in the target_date month, ordered by playlist_weight (highest first)
     - exclude performers without a PerformerSong with valid `youtube_video_id` and `youtube_url`
+    - exclude songs shorter than MIN_SONG_SELECTION_DURATION_SECONDS (default: 25 seconds)
     - exclude songs longer than MAX_SONG_SELECTION_DURATION_MINUTES (default: 10 minutes)
+    - exclude songs already in any playlist
 2. For each performer, selects their most popular song (by youtube_view_count)
 3. Creates a YouTube playlist with these songs
 4. Creates MonthlyPlaylist and MonthlyPlaylistEntry records
@@ -160,8 +162,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--secrets-file",
             type=str,
-            default="secrets.json",
-            help="Path to Google OAuth secrets file (default: secrets.json)",
+            default="../client_secret.json",
+            help="Path to Google OAuth secrets file (default: ../client_secret.json)",
         )
         parser.add_argument(
             "--dry-run",
@@ -235,6 +237,9 @@ class Command(BaseCommand):
             )
             return
 
+        # Get songs already in any playlist
+        songs_in_playlists = MonthlyPlaylistEntry.objects.values_list("song_id", flat=True)
+
         # Select performers with unique songs (deduplicate by video_id)
         selected_songs = []
         used_video_ids = set()
@@ -244,15 +249,20 @@ class Command(BaseCommand):
                 break
 
             # Get most popular song by youtube_view_count
+            # Exclude songs shorter than MIN_SONG_SELECTION_DURATION_SECONDS
             # Exclude songs longer than MAX_SONG_SELECTION_DURATION_MINUTES
+            # Exclude songs already in any playlist
+            min_duration_seconds = settings.MIN_SONG_SELECTION_DURATION_SECONDS
             max_duration_seconds = settings.MAX_SONG_SELECTION_DURATION_MINUTES * 60
             most_popular_song = (
                 PerformerSong.objects.filter(
                     performer=performer,
                     youtube_video_id__isnull=False,
+                    youtube_duration_seconds__gte=min_duration_seconds,
                     youtube_duration_seconds__lte=max_duration_seconds,
                 )
                 .exclude(youtube_video_id="")
+                .exclude(id__in=songs_in_playlists)
                 .order_by("-youtube_view_count", "title")
                 .first()
             )
@@ -292,32 +302,11 @@ class Command(BaseCommand):
             return
 
         # Create YouTube playlist
-        playlist_title = f"HAKKO-AKKEI {target_date.strftime('%B')} [TOKYO] ({target_date.strftime('%Y')})"
+        month_name = target_date.strftime("%B").upper()
+        year = target_date.strftime("%Y")
+        playlist_title = f"HAKKO-AKKEI {month_name} {year} TOKYO Playlist Introduction"
 
-        # Build description with performance details for each performer
-        description_lines = [f"Monthly playlist featuring top performers for {target_date.strftime('%B %Y')}."]
-        description_lines.append("")  # Empty line
-
-        for performer, song in selected_songs:  # noqa: B007
-            # Get the performer's performances in the target month
-            performances = (
-                performer.performance_schedules.filter(
-                    performance_date__gte=month_start,
-                    performance_date__lt=month_end,
-                )
-                .select_related("live_house", "live_house__website")
-                .order_by("performance_date")
-            )
-
-            # Add each performance to the description
-            for perf in performances:
-                day_of_week = perf.performance_date.strftime("%a").upper()
-                performance_date = perf.performance_date.strftime("%Y-%m-%d")
-                venue_name = perf.live_house.name
-                venue_url = perf.live_house.website.url
-                description_lines.append(
-                    f"{performer.name} {performance_date} ({day_of_week}) @{venue_name} - {venue_url}"
-                )
+        # Build description
         tags = (
             "indies",
             "indierock",
@@ -333,10 +322,11 @@ class Command(BaseCommand):
             "jrock",
         )
         tags_str = "\n".join(f"#{t}" for t in tags)
+        month_name = target_date.strftime("%B")
 
-        description_lines.append("\n")
-        description_lines.append(tags_str)
-        playlist_description = "\n".join(description_lines)
+        playlist_description = f"""Discover bands performing in TOKYO Live Houses for {month_name} {year}.
+
+{tags_str}"""
 
         try:
             youtube_playlist_id = create_youtube_playlist(playlist_title, playlist_description, secrets_file)

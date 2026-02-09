@@ -20,27 +20,6 @@ class MalcolmCrawler(LiveHouseWebsiteCrawler):
     - Event names and ticket information
     """
 
-    def find_schedule_link(self, html_content: str) -> str | None:
-        """Find the schedule link for Malcolm website."""
-        soup = self.create_soup(html_content)
-
-        # Look for schedule-related links
-        schedule_patterns = ["schedule", "スケジュール", "event", "イベント"]
-
-        for pattern in schedule_patterns:
-            # Check links with matching text
-            schedule_link = soup.find("a", text=re.compile(pattern, re.IGNORECASE))
-            if schedule_link and schedule_link.get("href"):
-                return urljoin(self.base_url, schedule_link["href"])
-
-            # Check links with matching href
-            schedule_link = soup.find("a", href=re.compile(pattern, re.IGNORECASE))
-            if schedule_link and schedule_link.get("href"):
-                return urljoin(self.base_url, schedule_link["href"])
-
-        # Malcolm often has the schedule on the main page
-        return self.base_url
-
     def extract_performance_schedules(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """
         Extract performance schedules from Malcolm's website.
@@ -234,6 +213,9 @@ class MalcolmCrawler(LiveHouseWebsiteCrawler):
             r"受付.*",
             r"合宿.*",
             r"初日.*",
+            # Date patterns (e.g., "11/15(SAT", "11/16(SUN")
+            r"^\d{1,2}/\d{1,2}\s*\(",  # MM/DD( format
+            r"^\d{1,2}/\d{1,2}\s*$",  # MM/DD only
         ]
 
         for pattern in skip_patterns:
