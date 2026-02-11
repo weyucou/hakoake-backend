@@ -225,6 +225,7 @@ class PerformerSocialLink(TimestampedModel):
     verified_datetime = models.DateTimeField(
         blank=True, null=True, default=None, help_text="Date and time when the PerformerSocialLink is verified"
     )
+    is_label = models.BooleanField(default=False)
 
     class Meta:
         unique_together = [("performer", "platform")]

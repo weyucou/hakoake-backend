@@ -70,10 +70,17 @@ def verify_social_link_action(request: HttpRequest) -> HttpResponse:
         return redirect("performers:verify_social_link")
 
     if action == "verify":
+        # Save edited performer name if changed
+        new_name = request.POST.get("performer_name", "").strip()
+        if new_name and new_name != link.performer.name:
+            link.performer.name = new_name
+            link.performer.save()
+
         # Save edited URL (user may have changed it) and mark as verified
         new_url = request.POST.get("platform_url", "").strip()
         if new_url:
             link.url = new_url
+        link.is_label = request.POST.get("is_label") == "on"
         link.verified_datetime = timezone.now()
         link.save()
 

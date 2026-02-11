@@ -138,6 +138,18 @@ class VerifySocialLinkDisplayTestCase(TestCase):
         response = self.client.get(VERIFY_URL)
         self.assertContains(response, "1 / 1 unverified")
 
+    def test_displays_editable_performer_name_input(self) -> None:
+        """Page contains an editable text input for the performer name."""
+        response = self.client.get(VERIFY_URL)
+        self.assertContains(response, 'name="performer_name"')
+        self.assertContains(response, f'value="{self.performer.name}"')
+
+    def test_is_label_checkbox_unchecked_by_default(self) -> None:
+        """Checkbox is present but not checked for a new (unverified) link."""
+        response = self.client.get(VERIFY_URL)
+        self.assertContains(response, 'name="is_label"')
+        self.assertNotContains(response, "checked")
+
 
 class VerifySocialLinkOrderingTestCase(TestCase):
     """Links are displayed in performer name + platform order."""
@@ -384,6 +396,74 @@ class VerifyActionTestCase(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn(VERIFY_URL, response.url)
+
+    def test_verify_saves_is_label_when_checked(self) -> None:
+        """POST with is_label=on sets is_label to True."""
+        self.client.post(
+            ACTION_URL,
+            {
+                "link_id": self.link.id,
+                "action": "verify",
+                "platform_url": self.link.url,
+                "is_label": "on",
+                "current_index": "0",
+            },
+        )
+
+        self.link.refresh_from_db()
+        self.assertTrue(self.link.is_label)
+
+    def test_verify_saves_is_label_false_when_unchecked(self) -> None:
+        """POST without is_label keeps is_label False."""
+        self.client.post(
+            ACTION_URL,
+            {
+                "link_id": self.link.id,
+                "action": "verify",
+                "platform_url": self.link.url,
+                "current_index": "0",
+            },
+        )
+
+        self.link.refresh_from_db()
+        self.assertFalse(self.link.is_label)
+
+    def test_is_label_checkbox_displayed(self) -> None:
+        """GET verify page contains the is_label checkbox."""
+        response = self.client.get(VERIFY_URL)
+        self.assertContains(response, 'name="is_label"')
+
+    def test_verify_saves_edited_performer_name(self) -> None:
+        """POST with performer_name updates the performer's name."""
+        self.client.post(
+            ACTION_URL,
+            {
+                "link_id": self.link.id,
+                "action": "verify",
+                "platform_url": self.link.url,
+                "performer_name": "NewName",
+                "current_index": "0",
+            },
+        )
+
+        self.performer.refresh_from_db()
+        self.assertEqual(self.performer.name, "NewName")
+
+    def test_verify_preserves_name_when_unchanged(self) -> None:
+        """POST with original name does not alter the performer's name."""
+        self.client.post(
+            ACTION_URL,
+            {
+                "link_id": self.link.id,
+                "action": "verify",
+                "platform_url": self.link.url,
+                "performer_name": "VerifyBand",
+                "current_index": "0",
+            },
+        )
+
+        self.performer.refresh_from_db()
+        self.assertEqual(self.performer.name, "VerifyBand")
 
     def test_unknown_action_redirects(self) -> None:
         """Unknown action value redirects back to verify view."""

@@ -1,172 +1,233 @@
 {% extends "base.html" %}
 
 {% block title %}Verify Social Links{% endblock %}
-{% block header_title %}Verify Social Links{% endblock %}
 
 {% block extra_css %}
 <style>
     .verify-card {
-        background: rgba(0,0,0,0.7);
-        border: 2px solid rgba(0,255,255,0.4);
-        border-radius: 15px;
-        padding: 30px;
-        max-width: 900px;
-        margin: 30px auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 720px;
+        margin: 0 auto;
+        animation: fadeUp 0.4s ease-out both;
+    }
+
+    .progress-info {
+        text-align: center;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--text-3);
+        margin-bottom: 28px;
+        letter-spacing: 0.02em;
+    }
+
+    /* Field rows */
+    .fields {
+        display: grid;
+        gap: 16px;
+        margin-bottom: 24px;
     }
 
     .field-row {
         display: flex;
-        align-items: baseline;
-        margin-bottom: 18px;
-        gap: 15px;
+        align-items: center;
+        gap: 12px;
     }
 
     .field-label {
-        font-family: 'Permanent Marker', cursive;
-        color: #00ffff;
-        min-width: 140px;
-        font-size: 1em;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        min-width: 110px;
+        flex-shrink: 0;
     }
 
     .field-value {
-        color: #f0f0f0;
-        font-family: monospace;
-        font-size: 1.1em;
+        font-family: var(--mono);
+        font-size: 0.92rem;
+        color: var(--text);
         word-break: break-all;
+    }
+
+    .field-value-muted {
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        color: var(--text-2);
+    }
+
+    /* Copy button */
+    .btn-copy {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--text-3);
+        font-size: 0.8rem;
+        padding: 4px 8px;
+        transition: all 0.15s;
+        line-height: 1;
+    }
+
+    .btn-copy:hover {
+        color: var(--text);
+        border-color: var(--border-hover);
+    }
+
+    /* Checkbox */
+    .label-checkbox {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--amber);
+        cursor: pointer;
+    }
+
+    /* URL input */
+    .url-section {
+        margin-bottom: 24px;
+    }
+
+    .name-input {
+        padding: 6px 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 0.92rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .name-input:focus {
+        outline: none;
+        border-color: var(--violet);
+        box-shadow: 0 0 0 3px rgba(167,139,250,0.12);
     }
 
     .url-input {
         width: 100%;
-        padding: 10px;
-        background: rgba(255,255,255,0.1);
-        border: 1px solid rgba(0,255,255,0.4);
-        border-radius: 8px;
-        color: #f0f0f0;
-        font-family: monospace;
-        font-size: 1em;
+        padding: 10px 14px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
 
     .url-input:focus {
         outline: none;
-        border-color: #ff0066;
-        box-shadow: 0 0 10px rgba(255,0,102,0.3);
+        border-color: var(--violet);
+        box-shadow: 0 0 0 3px rgba(167,139,250,0.12);
     }
 
+    .url-open-link {
+        margin-top: 8px;
+    }
+
+    .url-open-link a {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--text-3);
+        text-decoration: none;
+        word-break: break-all;
+        transition: color 0.15s;
+    }
+
+    .url-open-link a:hover {
+        color: var(--text-2);
+    }
+
+    /* Action buttons */
     .btn-row {
         display: flex;
-        gap: 15px;
-        margin-top: 25px;
+        gap: 10px;
+        margin-top: 20px;
         justify-content: center;
         flex-wrap: wrap;
     }
 
     .btn-verify {
-        background: linear-gradient(45deg, #00cc44, #00ff66);
-        color: #000;
-        font-weight: bold;
-        padding: 12px 30px;
+        background: var(--green);
+        color: #0b0b0f;
+        font-family: var(--body);
+        font-weight: 700;
+        padding: 10px 28px;
         border: none;
-        border-radius: 25px;
+        border-radius: 10px;
         cursor: pointer;
-        font-size: 1em;
-        transition: all 0.3s ease;
+        font-size: 0.88rem;
+        transition: all 0.15s;
     }
 
     .btn-verify:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,255,102,0.4);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(52,211,153,0.25);
     }
 
     .btn-skip {
-        background: linear-gradient(45deg, #666, #888);
-        color: #fff;
-        font-weight: bold;
-        padding: 12px 30px;
-        border: none;
-        border-radius: 25px;
+        background: var(--elevated);
+        color: var(--text-2);
+        font-family: var(--body);
+        font-weight: 600;
+        padding: 10px 22px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
         cursor: pointer;
-        font-size: 1em;
+        font-size: 0.85rem;
         text-decoration: none;
-        transition: all 0.3s ease;
+        transition: all 0.15s;
     }
 
     .btn-skip:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(136,136,136,0.4);
+        color: var(--text);
+        border-color: var(--border-hover);
+    }
+
+    /* Danger zone */
+    .danger-zone {
+        border-top: 1px solid var(--border);
+        margin-top: 28px;
+        padding-top: 20px;
     }
 
     .btn-delete {
-        background: linear-gradient(45deg, #cc0000, #ff3333);
-        color: #fff;
-        font-weight: bold;
-        padding: 12px 30px;
-        border: none;
-        border-radius: 25px;
+        background: transparent;
+        color: var(--text-3);
+        font-family: var(--body);
+        font-weight: 600;
+        padding: 8px 18px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
         cursor: pointer;
-        font-size: 1em;
-        transition: all 0.3s ease;
+        font-size: 0.8rem;
+        transition: all 0.15s;
     }
 
     .btn-delete:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(255,0,0,0.4);
+        color: var(--red);
+        border-color: rgba(255,51,88,0.3);
+        background: rgba(255,51,88,0.06);
     }
 
-    .progress-info {
-        text-align: center;
-        color: #888;
-        font-family: monospace;
-        margin-bottom: 20px;
-        font-size: 0.9em;
-    }
-
-    .empty-state {
-        text-align: center;
-        padding: 60px 20px;
-    }
-
+    /* Empty state */
     .empty-state h2 {
-        color: #00ff66;
+        color: var(--green);
+        font-size: 1.3rem;
     }
-
-    .btn-copy {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: #00ffff;
-        font-size: 1.1em;
-        padding: 2px 6px;
-        transition: color 0.2s;
-        vertical-align: middle;
-    }
-
-    .btn-copy:hover {
-        color: #ff0066;
-    }
-
-    .url-open-link {
-        margin-top: 6px;
-    }
-
-    .url-open-link a {
-        color: #ffff00;
-        text-decoration: underline;
-        font-family: monospace;
-        font-size: 0.9em;
-        word-break: break-all;
-        transition: color 0.2s;
-    }
-
-    .url-open-link a:hover {
-        color: #ff0066;
-    }
-
 </style>
 {% endblock %}
 
 {% block content %}
 {% if not link %}
-    <div class="content-section empty-state">
+    <div class="content-section empty-state" style="animation: fadeUp 0.4s ease-out both;">
+        <i class="fas fa-check-circle" style="font-size: 2.5rem; color: var(--green); margin-bottom: 16px; display: block;"></i>
         <h2>All links verified</h2>
         <p>No unverified social links remaining.</p>
     </div>
@@ -174,39 +235,52 @@
     <div class="verify-card">
         <div class="progress-info">{{ position }} / {{ total }} unverified</div>
 
-        <div class="field-row">
-            <span class="field-label">Performer ID</span>
-            <span class="field-value">{{ link.performer.id }}</span>
+        <div class="fields">
+            <div class="field-row">
+                <span class="field-label">ID</span>
+                <span class="field-value-muted">{{ link.performer.id }}</span>
+            </div>
+
+            <div class="field-row">
+                <span class="field-label">Performer</span>
+                <input type="text" name="performer_name" form="verify-form"
+                       class="name-input" value="{{ link.performer.name }}">
+                <button type="button" class="btn-copy" id="copy-name-btn" title="Copy performer name">
+                    <i class="fa-regular fa-copy"></i>
+                </button>
+            </div>
+
+            <div class="field-row">
+                <span class="field-label">Platform</span>
+                <span class="field-value">{{ link.platform }}</span>
+            </div>
+
+            <div class="field-row">
+                <span class="field-label">Label?</span>
+                <input type="checkbox" id="is-label-checkbox" name="is_label" form="verify-form"
+                       class="label-checkbox"
+                       {% if link.is_label %}checked{% endif %}>
+            </div>
         </div>
 
-        <div class="field-row">
-            <span class="field-label">Performer</span>
-            <span class="field-value">{{ link.performer.name }}</span>
-            <button type="button" class="btn-copy" id="copy-name-btn" title="Copy performer name"><i class="fa-regular fa-copy"></i></button>
-        </div>
-
-        <div class="field-row">
-            <span class="field-label">Platform</span>
-            <span class="field-value">{{ link.platform }}</span>
-        </div>
-
-        <form method="post" action="{% url 'performers:verify_social_link_action' %}" style="margin-top: 15px;">
+        <form id="verify-form" method="post" action="{% url 'performers:verify_social_link_action' %}">
             {% csrf_token %}
             <input type="hidden" name="link_id" value="{{ link.id }}">
             <input type="hidden" name="current_index" value="{{ current_index }}">
-            <div>
+
+            <div class="url-section">
                 <input type="url" name="platform_url" class="url-input" value="{{ link.url }}" placeholder="Enter URL">
+                {% if link.url %}
+                    <div class="url-open-link">
+                        <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.url }}</a>
+                    </div>
+                {% endif %}
+                {% if link.platform == "youtube" %}
+                    <div class="url-open-link">
+                        <a href="https://www.youtube.com/results?search_query=%22{{ link.performer.name|urlencode }}%22+%E3%83%90%E3%83%B3%E3%83%89" target="_blank" rel="noopener noreferrer">YouTube search: {{ link.performer.name }} バンド</a>
+                    </div>
+                {% endif %}
             </div>
-            {% if link.url %}
-                <div class="url-open-link">
-                    <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.url }}</a>
-                </div>
-            {% endif %}
-            {% if link.platform == "youtube" %}
-                <div class="url-open-link">
-                    <a href="https://www.youtube.com/results?search_query=%22{{ link.performer.name|urlencode }}%22+%E3%83%90%E3%83%B3%E3%83%89" target="_blank" rel="noopener noreferrer">YouTube search: {{ link.performer.name }} バンド</a>
-                </div>
-            {% endif %}
 
             <div class="btn-row">
                 <button type="submit" name="action" value="verify" class="btn-verify">Verify</button>
@@ -216,23 +290,24 @@
             </div>
         </form>
 
-        <div class="btn-row">
-            <form method="post" action="{% url 'performers:verify_social_link_action' %}"
-                  onsubmit="return confirm('Delete this {{ link.platform }} social link for {{ link.performer.name }}?');">
-                {% csrf_token %}
-                <input type="hidden" name="link_id" value="{{ link.id }}">
-                <input type="hidden" name="current_index" value="{{ current_index }}">
-                <button type="submit" name="action" value="delete_social_link" class="btn-delete">Delete Social Link</button>
-            </form>
-            <form method="post" action="{% url 'performers:verify_social_link_action' %}"
-                  onsubmit="return confirm('Delete performer {{ link.performer.name }}? This removes all their social links, songs, and members.');">
-                {% csrf_token %}
-                <input type="hidden" name="link_id" value="{{ link.id }}">
-                <input type="hidden" name="current_index" value="{{ current_index }}">
-                <button type="submit" name="action" value="delete_performer" class="btn-delete">Delete Performer</button>
-            </form>
+        <div class="danger-zone">
+            <div class="btn-row">
+                <form method="post" action="{% url 'performers:verify_social_link_action' %}"
+                      onsubmit="return confirm('Delete this {{ link.platform }} social link for {{ link.performer.name }}?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="link_id" value="{{ link.id }}">
+                    <input type="hidden" name="current_index" value="{{ current_index }}">
+                    <button type="submit" name="action" value="delete_social_link" class="btn-delete">Delete Social Link</button>
+                </form>
+                <form method="post" action="{% url 'performers:verify_social_link_action' %}"
+                      onsubmit="return confirm('Delete performer {{ link.performer.name }}? This removes all their social links, songs, and members.');">
+                    {% csrf_token %}
+                    <input type="hidden" name="link_id" value="{{ link.id }}">
+                    <input type="hidden" name="current_index" value="{{ current_index }}">
+                    <button type="submit" name="action" value="delete_performer" class="btn-delete">Delete Performer</button>
+                </form>
+            </div>
         </div>
-
     </div>
 {% endif %}
 {% endblock %}
@@ -242,7 +317,8 @@
 <script>
     document.getElementById('copy-name-btn').addEventListener('click', function() {
         var btn = this;
-        navigator.clipboard.writeText('{{ link.performer.name|escapejs }}').then(function() {
+        var nameInput = document.querySelector('input[name="performer_name"]');
+        navigator.clipboard.writeText(nameInput ? nameInput.value : '{{ link.performer.name|escapejs }}').then(function() {
             var icon = btn.innerHTML;
             btn.textContent = 'copied!';
             setTimeout(function() { btn.innerHTML = icon; }, 1000);
@@ -251,4 +327,3 @@
 </script>
 {% endif %}
 {% endblock %}
-

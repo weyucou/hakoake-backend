@@ -1,464 +1,359 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ performer.name }} - 東京ライブハウス{% endblock %}
+{% block title %}{{ performer.name }} - HAKOAKE{% endblock %}
 
 {% block extra_css %}
 <style>
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 500;
+        padding: 6px 0;
+        margin-bottom: 24px;
+        transition: color 0.15s;
+    }
+
+    .back-link:hover { color: var(--text); }
+
+    /* Hero */
     .performer-hero {
-        background: linear-gradient(135deg, rgba(255,0,102,0.2), rgba(0,255,255,0.2));
-        padding: 40px;
-        border-radius: 20px;
-        border: 3px solid rgba(255,0,102,0.5);
-        margin-bottom: 30px;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .performer-hero::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: conic-gradient(from 0deg, 
-            rgba(255,0,102,0.1) 0deg, 
-            rgba(0,255,255,0.1) 120deg, 
-            rgba(255,255,0,0.1) 240deg, 
-            rgba(255,0,102,0.1) 360deg);
-        animation: spin 15s linear infinite;
-        pointer-events: none;
-    }
-
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-
-    .performer-hero > * {
-        position: relative;
-        z-index: 1;
+        margin-bottom: 32px;
+        animation: fadeUp 0.4s ease-out both;
     }
 
     .performer-name {
-        font-family: 'Creepster', cursive;
-        font-size: 3em;
-        text-align: center;
-        background: linear-gradient(45deg, #ff0066, #00ffff, #ffff00);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        font-family: var(--display);
+        font-weight: 800;
+        font-size: clamp(2.2rem, 7vw, 3.5rem);
+        letter-spacing: -0.03em;
+        color: var(--text);
+        line-height: 1.05;
         margin-bottom: 20px;
-        animation: glitch 3s infinite;
     }
 
-    @keyframes glitch {
-        0%, 100% { transform: translateX(0); }
-        20% { transform: translateX(-2px); }
-        40% { transform: translateX(2px); }
-        60% { transform: translateX(-1px); }
-        80% { transform: translateX(1px); }
+    .performer-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
     }
 
-    .performer-info {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 20px;
-        text-align: center;
-        margin-bottom: 30px;
+    .meta-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        font-size: 0.82rem;
+        color: var(--text-2);
     }
 
-    .info-item {
-        background: rgba(0,0,0,0.4);
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid rgba(255,255,255,0.2);
+    .meta-tag .label {
+        color: var(--text-3);
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
 
-    .info-label {
-        color: #00ffff;
-        font-weight: bold;
-        margin-bottom: 5px;
+    .meta-tag a {
+        color: var(--violet);
+        text-decoration: none;
+        transition: color 0.15s;
     }
 
-    .info-value {
-        color: #fff;
-        font-size: 1.1em;
-    }
+    .meta-tag a:hover { color: var(--text); }
 
+    /* Social links */
     .social-section {
-        margin-bottom: 30px;
+        margin-bottom: 32px;
+        animation: fadeUp 0.4s ease-out 0.06s both;
+    }
+
+    .social-section h2 {
+        margin-bottom: 16px;
+        color: var(--text);
     }
 
     .social-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 20px;
-        margin-top: 20px;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 10px;
     }
 
     .social-card {
-        background: rgba(0,0,0,0.6);
-        padding: 20px;
-        border-radius: 15px;
-        border: 2px solid rgba(0,255,255,0.3);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .social-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-        transition: left 0.5s;
-    }
-
-    .social-card:hover::before {
-        left: 100%;
-    }
-
-    .social-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 5px 20px rgba(0,255,255,0.4);
-    }
-
-    .social-card > * {
-        position: relative;
-        z-index: 1;
-    }
-
-    .social-header {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 18px;
         display: flex;
         align-items: center;
-        gap: 15px;
-        margin-bottom: 15px;
+        gap: 14px;
+        transition: border-color 0.15s;
+        text-decoration: none;
     }
 
+    .social-card:hover { border-color: var(--border-hover); }
+
     .social-icon {
-        width: 50px;
-        height: 50px;
-        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: white;
-        font-size: 1.5em;
-        text-decoration: none;
-        transition: all 0.3s ease;
+        color: #fff;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+        background: var(--pc, var(--text-3));
     }
 
-    .social-icon.twitter { background: #1DA1F2; }
-    .social-icon.instagram { background: linear-gradient(45deg, #E4405F, #FD1D1D, #FCB045); }
-    .social-icon.youtube { background: #FF0000; }
-    .social-icon.facebook { background: #1877F2; }
-    .social-icon.bandcamp { background: #629AA0; }
-    .social-icon.soundcloud { background: #FF3300; }
-    .social-icon.spotify { background: #1DB954; }
-    .social-icon.apple_music { background: #FA243C; }
-    .social-icon.tiktok { background: #000000; }
-    .social-icon.discord { background: #5865F2; }
-    .social-icon.twitch { background: #9146FF; }
-    .social-icon.reddit { background: #FF4500; }
-    .social-icon.linkedin { background: #0077B5; }
-    .social-icon.vimeo { background: #1AB7EA; }
-    .social-icon.github { background: #333333; }
-    .social-icon.patreon { background: #F96854; }
-    .social-icon.mastodon { background: #6364FF; }
+    .social-body { flex: 1; min-width: 0; }
 
-    .social-icon:hover {
-        transform: scale(1.1) rotate(360deg);
-        box-shadow: 0 0 20px rgba(255,255,255,0.5);
-    }
-
-    .social-info {
-        flex: 1;
-    }
-
-    .social-platform {
-        font-size: 1.2em;
-        font-weight: bold;
-        color: #00ffff;
-        margin-bottom: 5px;
+    .social-platform-name {
+        font-weight: 600;
+        font-size: 0.88rem;
+        color: var(--text);
+        margin-bottom: 1px;
     }
 
     .social-handle {
-        color: #fff;
-        font-size: 1.1em;
-    }
-
-    .social-link {
-        color: #ff0066;
-        text-decoration: none;
-        word-break: break-all;
-    }
-
-    .social-link:hover {
-        text-shadow: 0 0 10px rgba(255,0,102,0.8);
-    }
-
-    .performances-section {
-        margin-bottom: 30px;
-    }
-
-    .performances-grid {
-        display: grid;
-        gap: 20px;
-        margin-top: 20px;
-    }
-
-    .performance-card {
-        background: rgba(255,0,102,0.1);
-        padding: 25px;
-        border-radius: 15px;
-        border: 2px solid rgba(255,0,102,0.3);
-        transition: all 0.3s ease;
-        position: relative;
+        font-size: 0.78rem;
+        color: var(--text-3);
         overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .performance-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-        transition: left 0.5s;
+    .social-url {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        color: var(--text-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: block;
+        margin-top: 2px;
     }
 
-    .performance-card:hover::before {
-        left: 100%;
+    .social-url:hover { color: var(--text-2); }
+
+    /* Performances */
+    .perf-section {
+        margin-bottom: 32px;
+        animation: fadeUp 0.4s ease-out 0.12s both;
     }
 
-    .performance-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 5px 20px rgba(255,0,102,0.4);
-        border-color: #ff0066;
+    .perf-section h2 {
+        margin-bottom: 16px;
+        color: var(--text);
     }
 
-    .performance-card > * {
-        position: relative;
-        z-index: 1;
+    .perf-grid { display: grid; gap: 10px; }
+
+    .perf-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        transition: border-color 0.15s;
     }
 
-    .performance-date {
-        font-family: 'Permanent Marker', cursive;
-        font-size: 1.5em;
-        color: #ffff00;
-        margin-bottom: 10px;
+    .perf-card:hover { border-color: var(--border-hover); }
+
+    .perf-date {
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--amber);
+        margin-bottom: 8px;
     }
 
-    .performance-venue {
-        font-size: 1.2em;
-        color: #ff0066;
-        margin-bottom: 10px;
-        font-weight: bold;
+    .perf-venue {
+        font-family: var(--jp);
+        font-weight: 700;
+        font-size: 0.95rem;
+        margin-bottom: 6px;
     }
 
-    .performance-time {
-        color: #00ffff;
-        font-size: 1.1em;
-    }
-
-    .back-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        background: linear-gradient(45deg, #00ffff, #0099cc);
-        color: white;
+    .perf-venue a {
+        color: var(--text);
         text-decoration: none;
-        padding: 15px 25px;
-        border-radius: 25px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-        margin-bottom: 30px;
+        transition: color 0.15s;
     }
 
-    .back-link:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,255,255,0.4);
+    .perf-venue a:hover { color: var(--red); }
+
+    .perf-time {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--text-2);
+        margin-bottom: 4px;
     }
 
-    .empty-state {
-        text-align: center;
-        padding: 40px 20px;
-        color: #888;
+    .perf-event-name {
+        font-size: 0.85rem;
+        color: var(--text-2);
+        margin-bottom: 8px;
     }
 
-    .empty-state i {
-        font-size: 3em;
-        margin-bottom: 15px;
-        color: #ff0066;
+    .co-performers {
+        font-size: 0.82rem;
+        color: var(--text-3);
+        margin-top: 8px;
     }
+
+    .co-performers a {
+        color: var(--violet);
+        text-decoration: none;
+        transition: color 0.15s;
+    }
+
+    .co-performers a:hover { color: var(--text); }
 
     @media (max-width: 768px) {
-        .performer-name {
-            font-size: 2em;
-        }
-        
-        .performer-info {
-            grid-template-columns: 1fr;
-        }
-        
-        .social-grid {
-            grid-template-columns: 1fr;
-        }
+        .social-grid { grid-template-columns: 1fr; }
+        .performer-meta { flex-direction: column; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <a href="{% url 'houses:schedule_current' %}" class="back-link">
-    <i class="fas fa-arrow-left"></i>
-    スケジュールに戻る
+    <i class="fas fa-arrow-left"></i> スケジュールに戻る
 </a>
 
 <div class="performer-hero">
-    <h1 class="performer-name">🎤 {{ performer.name }}</h1>
-    
-    <div class="performer-info">
+    <h1 class="performer-name">{{ performer.name }}</h1>
+
+    <div class="performer-meta">
         {% if performer.name_kana %}
-            <div class="info-item">
-                <div class="info-label">カナ読み</div>
-                <div class="info-value">{{ performer.name_kana }}</div>
+            <div class="meta-tag">
+                <span class="label">カナ</span> {{ performer.name_kana }}
             </div>
         {% endif %}
-        
+
         {% if performer.name_romaji %}
-            <div class="info-item">
-                <div class="info-label">ローマ字</div>
-                <div class="info-value">{{ performer.name_romaji }}</div>
+            <div class="meta-tag">
+                <span class="label">Romaji</span> {{ performer.name_romaji }}
             </div>
         {% endif %}
-        
+
         {% if performer.website %}
-            <div class="info-item">
-                <div class="info-label">ウェブサイト</div>
-                <div class="info-value">
-                    <a href="{{ performer.website }}" target="_blank" class="social-link">
-                        <i class="fas fa-external-link-alt"></i> サイト
-                    </a>
-                </div>
+            <div class="meta-tag">
+                <span class="label">Web</span>
+                <a href="{{ performer.website }}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> サイト</a>
             </div>
         {% endif %}
     </div>
 </div>
 
 {% if social_links %}
-    <div class="content-section social-section">
-        <h2><i class="fas fa-share-alt"></i> ソーシャルメディア</h2>
+    <div class="social-section">
+        <h2>ソーシャル</h2>
         <div class="social-grid">
             {% for social in social_links %}
-                <div class="social-card">
-                    <div class="social-header">
-                        <a href="{{ social.url }}" target="_blank" class="social-icon {{ social.platform }}">
-                            {% if social.platform == 'twitter' %}
-                                <i class="fab fa-twitter"></i>
-                            {% elif social.platform == 'instagram' %}
-                                <i class="fab fa-instagram"></i>
-                            {% elif social.platform == 'youtube' %}
-                                <i class="fab fa-youtube"></i>
-                            {% elif social.platform == 'facebook' %}
-                                <i class="fab fa-facebook"></i>
-                            {% elif social.platform == 'bandcamp' %}
-                                <i class="fab fa-bandcamp"></i>
-                            {% elif social.platform == 'soundcloud' %}
-                                <i class="fab fa-soundcloud"></i>
-                            {% elif social.platform == 'spotify' %}
-                                <i class="fab fa-spotify"></i>
-                            {% elif social.platform == 'apple_music' %}
-                                <i class="fab fa-apple"></i>
-                            {% elif social.platform == 'tiktok' %}
-                                <i class="fab fa-tiktok"></i>
-                            {% elif social.platform == 'discord' %}
-                                <i class="fab fa-discord"></i>
-                            {% elif social.platform == 'twitch' %}
-                                <i class="fab fa-twitch"></i>
-                            {% elif social.platform == 'reddit' %}
-                                <i class="fab fa-reddit"></i>
-                            {% elif social.platform == 'linkedin' %}
-                                <i class="fab fa-linkedin"></i>
-                            {% elif social.platform == 'vimeo' %}
-                                <i class="fab fa-vimeo"></i>
-                            {% elif social.platform == 'github' %}
-                                <i class="fab fa-github"></i>
-                            {% elif social.platform == 'patreon' %}
-                                <i class="fab fa-patreon"></i>
-                            {% elif social.platform == 'mastodon' %}
-                                <i class="fab fa-mastodon"></i>
-                            {% else %}
-                                <i class="fas fa-link"></i>
-                            {% endif %}
-                        </a>
-                        <div class="social-info">
-                            <div class="social-platform">
-                                {% if social.platform == 'twitter' %}Twitter
-                                {% elif social.platform == 'instagram' %}Instagram
-                                {% elif social.platform == 'youtube' %}YouTube
-                                {% elif social.platform == 'facebook' %}Facebook
-                                {% elif social.platform == 'bandcamp' %}Bandcamp
-                                {% elif social.platform == 'soundcloud' %}SoundCloud
-                                {% elif social.platform == 'spotify' %}Spotify
-                                {% elif social.platform == 'apple_music' %}Apple Music
-                                {% elif social.platform == 'tiktok' %}TikTok
-                                {% elif social.platform == 'discord' %}Discord
-                                {% elif social.platform == 'twitch' %}Twitch
-                                {% elif social.platform == 'reddit' %}Reddit
-                                {% elif social.platform == 'linkedin' %}LinkedIn
-                                {% elif social.platform == 'vimeo' %}Vimeo
-                                {% elif social.platform == 'github' %}GitHub
-                                {% elif social.platform == 'patreon' %}Patreon
-                                {% elif social.platform == 'mastodon' %}Mastodon
-                                {% else %}{{ social.platform|title }}
-                                {% endif %}
-                            </div>
-                            <div class="social-handle">@{{ social.platform_id }}</div>
-                        </div>
+                <a href="{{ social.url }}" target="_blank" rel="noopener" class="social-card platform-{{ social.platform }}">
+                    <div class="social-icon">
+                        {% if social.platform == 'twitter' %}
+                            <i class="fab fa-twitter"></i>
+                        {% elif social.platform == 'instagram' %}
+                            <i class="fab fa-instagram"></i>
+                        {% elif social.platform == 'youtube' %}
+                            <i class="fab fa-youtube"></i>
+                        {% elif social.platform == 'facebook' %}
+                            <i class="fab fa-facebook"></i>
+                        {% elif social.platform == 'bandcamp' %}
+                            <i class="fab fa-bandcamp"></i>
+                        {% elif social.platform == 'soundcloud' %}
+                            <i class="fab fa-soundcloud"></i>
+                        {% elif social.platform == 'spotify' %}
+                            <i class="fab fa-spotify"></i>
+                        {% elif social.platform == 'apple_music' %}
+                            <i class="fab fa-apple"></i>
+                        {% elif social.platform == 'tiktok' %}
+                            <i class="fab fa-tiktok"></i>
+                        {% elif social.platform == 'discord' %}
+                            <i class="fab fa-discord"></i>
+                        {% elif social.platform == 'twitch' %}
+                            <i class="fab fa-twitch"></i>
+                        {% elif social.platform == 'reddit' %}
+                            <i class="fab fa-reddit"></i>
+                        {% elif social.platform == 'linkedin' %}
+                            <i class="fab fa-linkedin"></i>
+                        {% elif social.platform == 'vimeo' %}
+                            <i class="fab fa-vimeo"></i>
+                        {% elif social.platform == 'github' %}
+                            <i class="fab fa-github"></i>
+                        {% elif social.platform == 'patreon' %}
+                            <i class="fab fa-patreon"></i>
+                        {% elif social.platform == 'mastodon' %}
+                            <i class="fab fa-mastodon"></i>
+                        {% else %}
+                            <i class="fas fa-link"></i>
+                        {% endif %}
                     </div>
-                    <a href="{{ social.url }}" target="_blank" class="social-link">
-                        {{ social.url|truncatechars:40 }}
-                    </a>
-                </div>
+                    <div class="social-body">
+                        <div class="social-platform-name">
+                            {% if social.platform == 'twitter' %}Twitter
+                            {% elif social.platform == 'instagram' %}Instagram
+                            {% elif social.platform == 'youtube' %}YouTube
+                            {% elif social.platform == 'facebook' %}Facebook
+                            {% elif social.platform == 'bandcamp' %}Bandcamp
+                            {% elif social.platform == 'soundcloud' %}SoundCloud
+                            {% elif social.platform == 'spotify' %}Spotify
+                            {% elif social.platform == 'apple_music' %}Apple Music
+                            {% elif social.platform == 'tiktok' %}TikTok
+                            {% elif social.platform == 'discord' %}Discord
+                            {% elif social.platform == 'twitch' %}Twitch
+                            {% elif social.platform == 'reddit' %}Reddit
+                            {% elif social.platform == 'linkedin' %}LinkedIn
+                            {% elif social.platform == 'vimeo' %}Vimeo
+                            {% elif social.platform == 'github' %}GitHub
+                            {% elif social.platform == 'patreon' %}Patreon
+                            {% elif social.platform == 'mastodon' %}Mastodon
+                            {% else %}{{ social.platform|title }}
+                            {% endif %}
+                        </div>
+                        {% if social.platform_id %}
+                            <div class="social-handle">@{{ social.platform_id }}</div>
+                        {% endif %}
+                        <span class="social-url">{{ social.url|truncatechars:50 }}</span>
+                    </div>
+                </a>
             {% endfor %}
         </div>
     </div>
 {% endif %}
 
-<div class="content-section performances-section">
-    <h2><i class="fas fa-calendar-alt"></i> 今後の予定</h2>
-    
+<div class="perf-section">
+    <h2>今後の予定</h2>
+
     {% if upcoming_performances %}
-        <div class="performances-grid">
+        <div class="perf-grid">
             {% for performance in upcoming_performances %}
-                <div class="performance-card">
-                    <div class="performance-date">
-                        📅 {{ performance.performance_date|date:"Y年m月d日 (l)" }}
+                <div class="perf-card">
+                    <div class="perf-date">{{ performance.performance_date|date:"Y年m月d日 (l)" }}</div>
+                    <div class="perf-venue">
+                        <a href="{% url 'houses:venue_detail' performance.live_house.id %}">{{ performance.live_house.name }}</a>
                     </div>
-                    <div class="performance-venue">
-                        🏠 <a href="{% url 'houses:venue_detail' performance.live_house.id %}" style="color: #ff0066; text-decoration: none;">{{ performance.live_house.name }}</a>
-                    </div>
-                    <div class="performance-time">
-                        <i class="fas fa-door-open"></i> 開場: {{ performance.open_time|date:"H:i" }} 
-                        <i class="fas fa-play"></i> 開演: {{ performance.start_time|date:"H:i" }}
+                    <div class="perf-time">
+                        開場 {{ performance.open_time|date:"H:i" }} / 開演 {{ performance.start_time|date:"H:i" }}
                     </div>
                     {% if performance.performance_name %}
-                    <div class="performance-time">
-                        🎭 {{ performance.performance_name }}
-                    </div>
+                        <div class="perf-event-name">{{ performance.performance_name }}</div>
                     {% endif %}
                     {% if performance.performers.count > 1 %}
-                        <div style="margin-top: 10px; color: #00ffff;">
-                            <i class="fas fa-users"></i> 共演: 
+                        <div class="co-performers">
+                            <i class="fas fa-users"></i>
                             {% for other_performer in performance.performers.all %}
                                 {% if other_performer != performer %}
-                                    <a href="{% url 'houses:performer_detail' other_performer.id %}" class="social-link">{{ other_performer.name }}</a>
-                                    {% if not forloop.last %}, {% endif %}
+                                    <a href="{% url 'houses:performer_detail' other_performer.id %}">{{ other_performer.name }}</a>{% if not forloop.last %}, {% endif %}
                                 {% endif %}
                             {% endfor %}
                         </div>
@@ -467,10 +362,12 @@
             {% endfor %}
         </div>
     {% else %}
-        <div class="empty-state">
-            <i class="fas fa-calendar-times"></i>
-            <h3>今後の予定はまだありません</h3>
-            <p>新しいライブ情報をお楽しみに！</p>
+        <div class="content-section">
+            <div class="empty-state">
+                <i class="fas fa-calendar-xmark"></i>
+                <h3>今後の予定はまだありません</h3>
+                <p>新しいライブ情報をお楽しみに</p>
+            </div>
         </div>
     {% endif %}
 </div>

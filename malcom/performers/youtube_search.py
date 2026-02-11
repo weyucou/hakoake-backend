@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import requests
 
+from .normalization import normalize_performer_name
+
 if TYPE_CHECKING:
     from .models import Performer, PerformerSong
 
@@ -214,6 +216,44 @@ class YouTubeSearcher:
 
         return videos
 
+    def channel_matches_performer(self, performer_name: str, channel_name: str, channel_id: str) -> bool:
+        """Check if a YouTube channel belongs to the performer.
+
+        Checks normalized channel name first (preferred), then falls back to
+        the channel page description.
+        """
+        normalized_performer = normalize_performer_name(performer_name)
+        normalized_channel = normalize_performer_name(channel_name)
+
+        if normalized_performer in normalized_channel:
+            return True
+
+        if channel_id:
+            description = self._fetch_channel_description(channel_id)
+            normalized_description = normalize_performer_name(description)
+            if normalized_performer in normalized_description:
+                return True
+
+        return False
+
+    def _fetch_channel_description(self, channel_id: str) -> str:
+        """Fetch a YouTube channel's description from its page metadata."""
+        url = f"https://www.youtube.com/channel/{channel_id}"
+        try:
+            response = self.session.get(url, timeout=10)
+            if response.status_code != requests.codes.ok:
+                return ""
+
+            match = re.search(r"var ytInitialData = ({.*?});</script>", response.text)
+            if not match:
+                return ""
+
+            data = json.loads(match.group(1))
+            return data.get("metadata", {}).get("channelMetadataRenderer", {}).get("description", "")
+        except Exception:  # noqa: BLE001
+            logger.debug(f"Failed to fetch channel description for {channel_id}")
+            return ""
+
     def _parse_view_count(self, view_text: str) -> int:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """Parse view count text like '1,234,567 views' to integer."""
         try:
@@ -287,6 +327,15 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
             # Create PerformerSocialLink for YouTube channel (only once per performer)
             if not channel_created and video_data.get("channel_id"):
                 channel_id = video_data["channel_id"]
+                channel_name = video_data.get("channel_name", "")
+
+                if not searcher.channel_matches_performer(performer.name, channel_name, channel_id):
+                    logger.debug(
+                        f"Channel '{channel_name}' does not match performer '{performer.name}', "
+                        "skipping social link creation"
+                    )
+                    continue
+
                 channel_url = f"https://www.youtube.com/channel/{channel_id}"
 
                 # Check if YouTube social link already exists
