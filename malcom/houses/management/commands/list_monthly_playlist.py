@@ -7,7 +7,7 @@ Shows performer, song, and performance live-houses/dates for each playlist entry
 import datetime
 from argparse import ArgumentParser
 
-from commons.functions import parse_month
+from commons.functions import get_month_end, parse_month
 from django.core.management.base import BaseCommand
 from django.db.models import QuerySet
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry, PerformanceSchedule
@@ -45,12 +45,7 @@ def format_schedule_price(schedule: PerformanceSchedule) -> str:
 
 def get_month_boundaries(playlist_date: datetime.date) -> tuple[datetime.date, datetime.date]:
     """Calculate month start and end dates from playlist date."""
-    month_start = playlist_date
-    if playlist_date.month == 12:  # noqa: PLR2004
-        month_end = playlist_date.replace(year=playlist_date.year + 1, month=1, day=1)
-    else:
-        month_end = playlist_date.replace(month=playlist_date.month + 1, day=1)
-    return month_start, month_end
+    return playlist_date, get_month_end(playlist_date)
 
 
 def get_performer_schedules(

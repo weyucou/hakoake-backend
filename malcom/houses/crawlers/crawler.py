@@ -14,28 +14,10 @@ from performers.models import Performer, PerformerSocialLink
 from performers.normalization import find_existing_performer
 from pykakasi import kakasi
 
-from ..definitions import CrawlerCollectionState, WebsiteProcessingState
+from ..definitions import YEAR_LOOKAHEAD, YEAR_LOOKBACK, CrawlerCollectionState, WebsiteProcessingState
 from ..models import LiveHouse, LiveHouseWebsite, PerformanceSchedule, PerformanceScheduleTicketPurchaseInfo
 
 logger = logging.getLogger(__name__)
-
-# Constants for validation and limits
-MIN_LIVEHOUSE_CAPACITY = 50  # noqa: N806
-MAX_LIVEHOUSE_CAPACITY = 350  # noqa: N806
-MIN_TICKET_PRICE = 500  # noqa: N806
-MAX_TICKET_PRICE = 20000  # noqa: N806
-YEAR_LOOKBACK = 1  # noqa: N806
-YEAR_LOOKAHEAD = 1  # noqa: N806
-MONTHS_PER_YEAR = 12  # noqa: N806
-MAX_DAYS_PER_MONTH = 31  # noqa: N806
-MAX_SCHEDULES_PER_FETCH = 20  # noqa: N806
-MAX_PERFORMERS_TO_DISPLAY = 5  # noqa: N806
-MIN_PERFORMER_NAME_LENGTH = 2  # noqa: N806
-MIN_SLASH_PARTS = 2  # noqa: N806
-HTTP_SUCCESS = 200  # noqa: N806
-MAX_SOCIAL_LINKS = 5  # noqa: N806
-MAX_CONTEXT_CHARS = 200  # noqa: N806
-MAX_PERFORMERS_IN_CONTEXT = 3  # noqa: N806
 
 
 def parse_japanese_time(time_str: str) -> tuple[time | None, int]:
@@ -395,9 +377,18 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         """
         return self._generic_find_next_month_link(html_content)
 
-    def create_performance_schedule(self, live_house: LiveHouse, data: dict) -> PerformanceSchedule:  # noqa: C901, PLR0912, PLR0915
+    def create_performance_schedule(self, live_house: LiveHouse, data: dict) -> PerformanceSchedule:
         """Create a PerformanceSchedule instance with ticket information."""
-        # Convert string date/time to appropriate objects
+        perf_date, open_time, start_time = self._parse_schedule_times(data)
+        clean_names = self._preprocess_performer_names(data.get("performers", []))
+        valid_performers = self._validate_performers(clean_names, live_house, perf_date)
+        performance = self._create_or_get_schedule(live_house, perf_date, open_time, start_time, data)
+        self._save_and_link_performers(performance, valid_performers)
+        self._extract_and_save_ticket_info(performance, data)
+        return performance
+
+    def _parse_schedule_times(self, data: dict) -> tuple[date, time | None, time | None]:
+        """Parse and convert date/time fields from schedule data."""
         performance_date = data["date"]
         if isinstance(performance_date, str):
             performance_date = datetime.strptime(performance_date, "%Y-%m-%d").date()  # noqa: DTZ007
@@ -419,98 +410,96 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         if start_time_days_offset > 0:
             performance_date = performance_date + timedelta(days=start_time_days_offset)
 
-        # Process and validate performers BEFORE any database operations
-        performer_names = data.get("performers", [])
+        return performance_date, open_time, start_time
+
+    def _preprocess_performer_names(self, performer_names: list[str] | str) -> list[str]:
+        """Split, clean, and filter performer names."""
         if isinstance(performer_names, str):
-            # Split by common delimiters
             performer_names = re.split(r"[,、/／]", performer_names)
             performer_names = [name.strip() for name in performer_names if name.strip()]
 
-        # Filter and clean performer names
-        clean_performer_names = []
+        clean_names = []
         for name in performer_names:
             cleaned_name = self._clean_performer_name(name)
             if cleaned_name and self._is_valid_performer_name(cleaned_name):
-                clean_performer_names.append(cleaned_name)
+                clean_names.append(cleaned_name)
+        return clean_names
 
-        # Validate all performers and collect valid ones BEFORE database operations
-        valid_performers = []
-        for performer_name in clean_performer_names:
-            # Check if performer already exists (normalized lookup)
+    def _validate_performers(
+        self, clean_names: list[str], live_house: LiveHouse, performance_date: date
+    ) -> list[Performer]:
+        """Validate all performers and return list of valid Performer objects (some unsaved)."""
+        valid_performers: list[Performer] = []
+        for performer_name in clean_names:
             existing_performer = find_existing_performer(performer_name)
             if existing_performer:
-                # Existing performer, assume it's already validated
                 valid_performers.append(existing_performer)
                 logger.debug(f"✅ Using existing validated performer: {performer_name}")
-            else:
-                # New performer - validate BEFORE creating in DB
-                logger.debug(f"🔍 Validating new performer: {performer_name}")
+                continue
 
-                # Convert name to Kana and Romaji using pykakasi
-                kks = kakasi()
-                result = kks.convert(performer_name)
-                performer_name_kana = "".join([item["kana"] for item in result])
-                performer_name_romaji = "".join([item["hepburn"] for item in result])
-                performer = Performer(
-                    name=performer_name,
-                    name_kana=performer_name_kana,
-                    name_romaji=performer_name_romaji,
+            # New performer - validate BEFORE creating in DB
+            logger.debug(f"🔍 Validating new performer: {performer_name}")
+            kks = kakasi()
+            result = kks.convert(performer_name)
+            performer = Performer(
+                name=performer_name,
+                name_kana="".join([item["kana"] for item in result]),
+                name_romaji="".join([item["hepburn"] for item in result]),
+            )
+
+            try:
+                self._search_for_performer_details(performer)
+                valid_performers.append(performer)
+                logger.info(f"✅ Validated new performer: {performer_name}")
+            except PerformerValidationError:
+                logger.error(  # noqa: TRY400
+                    f"❌ Skipping performer '{performer_name}' for "
+                    f"[{live_house.id}] {live_house.name} on {performance_date}"
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.exception(
+                    f"❌ Failed to process performer '{performer_name}' for {live_house.name} "
+                    f"on {performance_date}: {e}"  # noqa: TRY401
                 )
 
-                try:
-                    # Validate BEFORE saving to database
-                    self._search_for_performer_details(performer)
-                    # If validation succeeds, add to valid list (will save later)
-                    valid_performers.append(performer)
-                    logger.info(f"✅ Validated new performer: {performer_name}")
-
-                except PerformerValidationError:
-                    # Log error for failed validation with venue and date context (no traceback needed)
-                    logger.error(  # noqa: TRY400
-                        f"❌ Skipping performer '{performer_name}' for "
-                        f"[{live_house.id}] {live_house.name} on {performance_date}"
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.exception(
-                        f"❌ Failed to process performer '{performer_name}' for {live_house.name} "
-                        f"on {performance_date}: {e}"  # noqa: TRY401
-                    )
-
-        # Skip schedule if no valid performers
         if not valid_performers:
             logger.warning(
                 f"⚠️ Skipping schedule for {live_house.name} on {performance_date}: No valid performers found"
             )
             raise ValueError("No valid performers for this schedule")  # noqa: B904
 
-        # NOW create the performance schedule (all validation passed)
-        defaults = {
-            "open_time": open_time,
-        }
+        return valid_performers
 
-        # Add performance name if provided
+    def _create_or_get_schedule(
+        self,
+        live_house: LiveHouse,
+        performance_date: date,
+        open_time: time | None,
+        start_time: time | None,
+        data: dict,
+    ) -> PerformanceSchedule:
+        """Create or retrieve the PerformanceSchedule record."""
+        defaults: dict = {"open_time": open_time}
         if "performance_name" in data and data["performance_name"]:
             defaults["performance_name"] = data["performance_name"]
 
-        performance, created = PerformanceSchedule.objects.get_or_create(
+        performance, _created = PerformanceSchedule.objects.get_or_create(
             live_house=live_house, performance_date=performance_date, start_time=start_time, defaults=defaults
         )
+        return performance
 
-        # Save new performers and add all valid performers to the schedule
+    def _save_and_link_performers(self, performance: PerformanceSchedule, valid_performers: list[Performer]) -> None:
+        """Save new performers to DB and link all valid performers to the schedule."""
         for performer in valid_performers:
             if performer.pk is None:  # New performer not yet saved
-                # Try normalized match before falling back to get_or_create on romaji
                 matched = find_existing_performer(performer.name)
                 if matched:
                     performer = matched  # noqa: PLW2901
                 else:
-                    # Use get_or_create to avoid UNIQUE constraint failures on name_romaji
-                    # If a performer with the same romaji exists, use that one instead
                     defaults = {
                         "name": performer.name,
                         "name_kana": performer.name_kana,
                     }
-                    # Add website if it's set on the performer object
                     if hasattr(performer, "website") and performer.website:
                         defaults["website"] = performer.website
 
@@ -524,17 +513,15 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                             f"ℹ️ Using existing performer with same romaji: {existing_performer.name} "
                             f"(requested: {performer.name}, romaji: {performer.name_romaji})"
                         )
-                    # Use the existing performer for the schedule
                     performer = existing_performer  # noqa: PLW2901
             performance.performers.add(performer)
 
-        # Extract and create/update ticket information from the context
+    def _extract_and_save_ticket_info(self, performance: PerformanceSchedule, data: dict) -> None:
+        """Extract ticket information from context and save it."""
         if "context" in data:
             ticket_info = self.extract_ticket_info("", data["context"])
             if ticket_info:
                 self._create_or_update_ticket_info(performance, ticket_info)
-
-        return performance
 
     # Generic helper methods that concrete implementations can use
     def _generic_extract_live_house_info(self, html_content: str) -> dict[str, str]:  # noqa: C901, PLR0912, PLR0915
@@ -887,6 +874,73 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         name = name.strip("- /\\()[]{}、。")
 
         return name.strip()
+
+    def _extract_open_start_times(self, text: str) -> dict[str, str | None]:
+        """Extract OPEN/START times from text using common Japanese live house patterns.
+
+        Tries English patterns (OPEN/START), Japanese patterns (開場/開演),
+        and bare HH:MM / HH:MM as a fallback.
+
+        Returns:
+            Dict with "open_time" and "start_time" keys (values may be None).
+        """
+        result: dict[str, str | None] = {"open_time": None, "start_time": None}
+
+        # Normalize full-width colon to ASCII
+        text = text.replace("：", ":")
+
+        # English: OPEN HH:MM / START HH:MM (with optional colon separator)
+        eng_pattern = r"OPEN\s*[:：]?\s*(\d{1,2}:\d{2})\s*[/／\-–\s]*START\s*[:：]?\s*(\d{1,2}:\d{2})"
+        match = re.search(eng_pattern, text, re.IGNORECASE)
+        if match:
+            result["open_time"] = match.group(1)
+            result["start_time"] = match.group(2)
+            return result
+
+        # Japanese: 開場 HH:MM / 開演 HH:MM
+        jp_pattern = r"開場\s*[:：]?\s*(\d{1,2}:\d{2})\s*[/／\-–\s]*開演\s*[:：]?\s*(\d{1,2}:\d{2})"
+        match = re.search(jp_pattern, text)
+        if match:
+            result["open_time"] = match.group(1)
+            result["start_time"] = match.group(2)
+            return result
+
+        # Bare fallback: HH:MM / HH:MM (two times separated by slash)
+        bare_pattern = r"(\d{1,2}:\d{2})\s*[/／]\s*(\d{1,2}:\d{2})"
+        match = re.search(bare_pattern, text)
+        if match:
+            result["open_time"] = match.group(1)
+            result["start_time"] = match.group(2)
+            return result
+
+        return result
+
+    def _extract_event_name_from_brackets(self, text: str) -> str | None:
+        """Extract event name from common Japanese bracket patterns.
+
+        Tries bracket pairs in order of specificity:
+        『』, 「」, 【】, "", ''
+
+        Returns:
+            The extracted event name, or None if no bracketed text found.
+        """
+        bracket_pairs = [
+            (r"『", r"』"),
+            (r"「", r"」"),
+            (r"【", r"】"),
+            (r'"', r'"'),
+            (r"'", r"'"),
+        ]
+
+        for open_b, close_b in bracket_pairs:
+            pattern = rf"{open_b}([^{close_b}]+){close_b}"
+            match = re.search(pattern, text)
+            if match:
+                name = match.group(1).strip()
+                if len(name) >= 2:  # noqa: PLR2004
+                    return name
+
+        return None
 
     def _is_valid_performer_name(self, name: str) -> bool:
         """Check if a name is likely to be a valid performer name (Japanese-focused)."""

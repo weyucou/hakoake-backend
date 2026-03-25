@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 from datetime import date, datetime
 
+from commons.functions import get_month_end
 from django.core.management.base import BaseCommand
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry, PerformanceSchedule
 
@@ -102,10 +103,7 @@ class Command(BaseCommand):
 
             # Calculate month boundaries (same logic as video generation)
             month_start = playlist.date
-            if playlist.date.month == 12:  # noqa: PLR2004
-                month_end = playlist.date.replace(year=playlist.date.year + 1, month=1, day=1)
-            else:
-                month_end = playlist.date.replace(month=playlist.date.month + 1, day=1)
+            month_end = get_month_end(month_start)
 
             # Get performance schedules for this performer in the playlist month
             schedules = PerformanceSchedule.objects.filter(

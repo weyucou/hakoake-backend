@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 
+from commons.functions import get_month_end
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -65,10 +66,7 @@ class Command(BaseCommand):
 
         # Validate performer is performing in the target month
         month_start = playlist.date.replace(day=1)
-        if playlist.date.month == 12:  # noqa: PLR2004
-            month_end = playlist.date.replace(year=playlist.date.year + 1, month=1, day=1)
-        else:
-            month_end = playlist.date.replace(month=playlist.date.month + 1, day=1)
+        month_end = get_month_end(month_start)
 
         performances_in_month = performer.performance_schedules.filter(
             performance_date__gte=month_start,

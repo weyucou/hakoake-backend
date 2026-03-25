@@ -1,5 +1,23 @@
 from commons.definitions import StringEnumWithChoices
 
+# Constants for crawler validation and limits
+MIN_LIVEHOUSE_CAPACITY = 50
+MAX_LIVEHOUSE_CAPACITY = 350
+MIN_TICKET_PRICE = 500
+MAX_TICKET_PRICE = 20000
+YEAR_LOOKBACK = 1
+YEAR_LOOKAHEAD = 1
+MONTHS_PER_YEAR = 12
+MAX_DAYS_PER_MONTH = 31
+MAX_SCHEDULES_PER_FETCH = 20
+MAX_PERFORMERS_TO_DISPLAY = 5
+MIN_PERFORMER_NAME_LENGTH = 2
+MIN_SLASH_PARTS = 2
+HTTP_SUCCESS = 200
+MAX_SOCIAL_LINKS = 5
+MAX_CONTEXT_CHARS = 200
+MAX_PERFORMERS_IN_CONTEXT = 3
+
 
 class WebsiteProcessingState(StringEnumWithChoices):
     """Enum representing the state of website processing."""

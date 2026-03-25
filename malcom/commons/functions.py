@@ -6,6 +6,13 @@ YYYY_MM_LENGTH = 7
 YYYY_MM_DD_LENGTH = 10
 
 
+def get_month_end(month_start: datetime.date) -> datetime.date:
+    """Return the first day of the next month after ``month_start``."""
+    if month_start.month == 12:  # noqa: PLR2004
+        return month_start.replace(year=month_start.year + 1, month=1, day=1)
+    return month_start.replace(month=month_start.month + 1, day=1)
+
+
 def parse_month(value: str | None, default_to_next_month: bool = False) -> datetime.date:
     """
     Parse a month string into a date (first day of the month).
@@ -24,9 +31,7 @@ def parse_month(value: str | None, default_to_next_month: bool = False) -> datet
     if value is None:
         today = datetime.date.today()  # noqa: DTZ011
         if default_to_next_month:
-            if today.month == 12:  # noqa: PLR2004
-                return datetime.date(today.year + 1, 1, 1)
-            return datetime.date(today.year, today.month + 1, 1)
+            return get_month_end(datetime.date(today.year, today.month, 1))
         return datetime.date(today.year, today.month, 1)
 
     value = value.strip()

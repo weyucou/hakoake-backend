@@ -17,24 +17,19 @@ This command:
 
 import datetime
 import logging
-import pickle
 from pathlib import Path
 
-import google_auth_oauthlib.flow
-import googleapiclient.discovery
-import googleapiclient.errors
+from commons.functions import get_month_end
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
-from google.auth.transport.requests import Request
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry
+from houses.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from performers.models import Performer, PerformerSong
 
 logger = logging.getLogger(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
 # Constants
 TOP_PERFORMERS_COUNT = 5  # noqa: N806
@@ -50,104 +45,6 @@ def date_str(v: str) -> datetime.date:
     if len(v) == YYYY_MM_DD_LENGTH:  # YYYY-MM-DD
         return datetime.datetime.strptime(v, "%Y-%m-%d").date()  # noqa: DTZ007
     raise ValueError(f"Invalid date format: {v}. Expected 'YYYY-MM' or 'YYYY-MM-DD'")  # noqa: B904
-
-
-def get_authorized_youtube_client(client_secrets_file: Path):
-    """Get an authorized YouTube API client."""
-    api_service_name = "youtube"
-    api_version = "v3"
-
-    # Define token cache file path (same directory as secrets file)
-    token_cache_file = client_secrets_file.parent / "token.pickle"
-
-    credentials = None
-
-    # Load existing credentials from cache if available
-    if token_cache_file.exists():
-        logger.info(f"Loading cached credentials from {token_cache_file}")
-        try:
-            credentials = pickle.loads(token_cache_file.read_bytes())  # noqa: S301
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Failed to load cached credentials: {e}")
-            credentials = None
-
-    # Check if credentials are valid or need refresh
-    if credentials and not credentials.valid and credentials.refresh_token:
-        logger.info("Refreshing expired credentials")
-        try:
-            credentials.refresh(Request())
-            logger.info("Successfully refreshed credentials")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Failed to refresh credentials: {e}")
-            credentials = None
-
-        # If we still don't have valid credentials, run OAuth flow
-        if not credentials:
-            logger.info("Running OAuth flow for new credentials")
-            flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(str(client_secrets_file), SCOPES)
-            credentials = flow.run_local_server(port=0)
-            logger.info("Successfully obtained new credentials")
-
-        # Save credentials to cache
-        logger.info(f"Saving credentials to cache: {token_cache_file}")
-        try:
-            token_cache_file.write_bytes(pickle.dumps(credentials))
-            logger.info("Successfully saved credentials to cache")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Failed to save credentials to cache: {e}")
-    else:
-        logger.info("Using cached valid credentials")
-
-    # Build and return YouTube API client
-    youtube = googleapiclient.discovery.build(api_service_name, api_version, credentials=credentials)
-    return youtube
-
-
-def create_youtube_playlist(title: str, description: str, client_secrets_file: Path) -> str:  # noqa: C901, PLR0912, PLR0915, PLR0911
-    """Create a new public YouTube playlist and return its ID."""
-    youtube = get_authorized_youtube_client(client_secrets_file)
-
-    request = youtube.playlists().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": title,
-                "description": description,
-            },
-            "status": {"privacyStatus": "public"},
-        },
-    )
-
-    response = request.execute()
-    playlist_id = response["id"]
-    logger.info(f"Created YouTube playlist: {title} (ID: {playlist_id})")
-    return playlist_id
-
-
-def add_video_to_playlist(playlist_id: str, video_id: str, client_secrets_file: Path) -> bool:
-    """Add a video to a YouTube playlist."""
-    youtube = get_authorized_youtube_client(client_secrets_file)
-
-    try:
-        request = youtube.playlistItems().insert(
-            part="snippet",
-            body={
-                "snippet": {
-                    "playlistId": playlist_id,
-                    "resourceId": {
-                        "kind": "youtube#video",
-                        "videoId": video_id,
-                    },
-                },
-            },
-        )
-        request.execute()
-    except googleapiclient.errors.HttpError:
-        logger.exception(f"Failed to add video {video_id} to playlist")
-        return False
-    else:
-        logger.info(f"Added video {video_id} to playlist {playlist_id}")
-        return True
 
 
 class Command(BaseCommand):
@@ -201,10 +98,7 @@ class Command(BaseCommand):
 
         # Calculate month boundaries for filtering performances
         month_start = target_date
-        if target_date.month == 12:  # noqa: PLR2004
-            month_end = target_date.replace(year=target_date.year + 1, month=1, day=1)
-        else:
-            month_end = target_date.replace(month=target_date.month + 1, day=1)
+        month_end = get_month_end(month_start)
 
         # Get IDs of performers who have at least one valid YouTube song
         performers_with_songs = (
