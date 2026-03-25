@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from commons.functions import get_month_end
 from django.core.management.base import BaseCommand
+from houses.formatting import format_duration
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry, PerformanceSchedule
 
 
@@ -125,15 +126,7 @@ class Command(BaseCommand):
                 presale = f"¥{first_schedule.presale_price:,.0f}" if first_schedule.presale_price else "-"
                 door = f"¥{first_schedule.door_price:,.0f}" if first_schedule.door_price else "-"
                 song_title = entry.song.title[:38] if entry.song.title else "-"
-
-                # Format duration as MM:SS
-                if entry.song.youtube_duration_seconds:
-                    minutes = entry.song.youtube_duration_seconds // 60
-                    seconds = entry.song.youtube_duration_seconds % 60
-                    duration = f"{minutes}:{seconds:02d}"
-                else:
-                    duration = "-"
-
+                duration = format_duration(entry.song.youtube_duration_seconds)
                 youtube_url = entry.song.youtube_url or "-"
 
                 self.stdout.write(
@@ -142,17 +135,8 @@ class Command(BaseCommand):
                     f"{presale:<10} {door:<10} {song_title:<40} {duration:<10} {youtube_url:<60}"
                 )
             else:
-                # Show performer even if they have no scheduled performances
                 song_title = entry.song.title[:38] if entry.song.title else "-"
-
-                # Format duration as MM:SS
-                if entry.song.youtube_duration_seconds:
-                    minutes = entry.song.youtube_duration_seconds // 60
-                    seconds = entry.song.youtube_duration_seconds % 60
-                    duration = f"{minutes}:{seconds:02d}"
-                else:
-                    duration = "-"
-
+                duration = format_duration(entry.song.youtube_duration_seconds)
                 youtube_url = entry.song.youtube_url or "-"
                 self.stdout.write(
                     f"{entry.position:<5} {performer.id:<15} {performer.name[:28]:<30} "

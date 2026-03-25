@@ -1,46 +1,14 @@
 import logging
-import pickle
 from pathlib import Path
 
-import google_auth_oauthlib.flow
-import googleapiclient.discovery
 from django.core.management.base import BaseCommand, CommandParser
-from google.auth.transport.requests import Request
+from houses.youtube_utils import get_authorized_youtube_client
 
 from performers.models import Performer, PerformerSocialLink, PerformerSong
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
-
-
-def get_youtube_client(client_secrets_file: Path):
-    """Get an authorized YouTube API client."""
-    api_service_name = "youtube"
-    api_version = "v3"
-
-    token_cache_file = client_secrets_file.parent / "token.pickle"
-
-    credentials = None
-
-    if token_cache_file.exists():
-        try:
-            credentials = pickle.loads(token_cache_file.read_bytes())  # noqa: S301
-        except Exception:  # noqa: BLE001
-            credentials = None
-
-    if credentials and not credentials.valid and credentials.refresh_token:
-        try:
-            credentials.refresh(Request())
-        except Exception:  # noqa: BLE001
-            credentials = None
-
-    if not credentials or not credentials.valid:
-        flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(str(client_secrets_file), SCOPES)
-        credentials = flow.run_local_server(port=0)
-        token_cache_file.write_bytes(pickle.dumps(credentials))
-
-    return googleapiclient.discovery.build(api_service_name, api_version, credentials=credentials)
+YOUTUBE_READONLY_SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 
 class Command(BaseCommand):
@@ -105,7 +73,7 @@ class Command(BaseCommand):
 
         youtube = None
         if not dry_run:
-            youtube = get_youtube_client(secrets_file)
+            youtube = get_authorized_youtube_client(secrets_file, scopes=YOUTUBE_READONLY_SCOPES)
 
         created_count = 0
         failed_count = 0

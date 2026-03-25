@@ -15,11 +15,10 @@ This command:
    - Non-selected performers: increment by 1
 """
 
-import datetime
 import logging
 from pathlib import Path
 
-from commons.functions import get_month_end
+from commons.functions import get_month_end, parse_month
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
@@ -31,20 +30,7 @@ from performers.models import Performer, PerformerSong
 
 logger = logging.getLogger(__name__)
 
-# Constants
-TOP_PERFORMERS_COUNT = 5  # noqa: N806
-YYYY_MM_LENGTH = 7  # noqa: N806
-YYYY_MM_DD_LENGTH = 10  # noqa: N806
-
-
-def date_str(v: str) -> datetime.date:
-    """Parse date string from 'YYYY-MM' or 'YYYY-MM-DD' format."""
-    v = v.strip()
-    if len(v) == YYYY_MM_LENGTH:  # YYYY-MM
-        return datetime.datetime.strptime(v, "%Y-%m").date()  # noqa: DTZ007
-    if len(v) == YYYY_MM_DD_LENGTH:  # YYYY-MM-DD
-        return datetime.datetime.strptime(v, "%Y-%m-%d").date()  # noqa: DTZ007
-    raise ValueError(f"Invalid date format: {v}. Expected 'YYYY-MM' or 'YYYY-MM-DD'")  # noqa: B904
+TOP_PERFORMERS_COUNT = 5
 
 
 class Command(BaseCommand):
@@ -73,15 +59,11 @@ class Command(BaseCommand):
         secrets_file = Path(options["secrets_file"])
         dry_run = options["dry_run"]
 
-        # Parse target month
         try:
-            target_date = date_str(target_month_str)
+            target_date = parse_month(target_month_str)
         except ValueError as e:
             self.stderr.write(self.style.ERROR(str(e)))
             return
-
-        # Set target_date to first day of month
-        target_date = target_date.replace(day=1)
 
         self.stdout.write(f"Creating monthly playlist for {target_date.strftime('%Y-%m')}")
 
