@@ -349,11 +349,11 @@ class TemplateRenderingTest(TestCase):
 
         response = self.client.get(url)
 
-        # Check for key CSS classes that indicate dirty punk theme
-        self.assertContains(response, "month-navigation")
-        self.assertContains(response, "performance-card")
+        # Check for key CSS classes
+        self.assertContains(response, "month-nav")
+        self.assertContains(response, "event")
         self.assertContains(response, "performer-tag")
-        self.assertContains(response, "stats-grid")
+        self.assertContains(response, "stats-row")
 
     def test_performer_detail_template_css_includes(self):
         """Test that performer detail template includes required CSS classes."""
@@ -375,8 +375,8 @@ class TemplateRenderingTest(TestCase):
         response = self.client.get(url)
 
         # Check for base template elements
-        self.assertContains(response, "東京ライブハウス")  # Site title
-        self.assertContains(response, "font-family: 'Creepster'")  # Punk fonts
+        self.assertContains(response, "HAKOAKE")  # Site name
+        self.assertContains(response, "'Syne'")  # Display font
         self.assertContains(response, "fa-")  # Font Awesome icons
         self.assertContains(response, "nav-links")  # Navigation
 

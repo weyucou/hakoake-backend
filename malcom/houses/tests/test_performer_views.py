@@ -190,7 +190,7 @@ class PerformerDetailViewTestCase(TestCase):
 
         # Check that co-performer is shown
         self.assertContains(response, "共演者")
-        self.assertContains(response, "共演:")
+        self.assertContains(response, "co-performers")
 
     def test_performer_venue_links(self):
         """Test that venue names link to venue detail pages."""
@@ -234,7 +234,7 @@ class PerformerDetailViewTestCase(TestCase):
         self.assertContains(response, "performer-name")
         self.assertContains(response, "back-link")
         self.assertContains(response, "social-grid")
-        self.assertContains(response, "performances-grid")
+        self.assertContains(response, "perf-grid")
 
     def test_back_link_navigation(self):
         """Test that back link points to schedule."""
