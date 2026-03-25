@@ -11,15 +11,15 @@ from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
+DEFAULT_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
 
-def get_authorized_youtube_client(client_secrets_file: Path):
+def get_authorized_youtube_client(client_secrets_file: Path, scopes: list[str] | None = None):
     """Get an authorized YouTube API client."""
     api_service_name = "youtube"
     api_version = "v3"
 
-    # Define token cache file path (same directory as secrets file)
+    scopes = scopes or DEFAULT_SCOPES
     token_cache_file = client_secrets_file.parent / "token.pickle"
 
     credentials = None
@@ -46,7 +46,7 @@ def get_authorized_youtube_client(client_secrets_file: Path):
     # Run OAuth flow if no valid credentials
     if not credentials or not credentials.valid:
         logger.info("Running OAuth flow for new credentials")
-        flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(str(client_secrets_file), SCOPES)
+        flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(str(client_secrets_file), scopes)
         credentials = flow.run_local_server(port=0)
         logger.info("Successfully obtained new credentials")
 

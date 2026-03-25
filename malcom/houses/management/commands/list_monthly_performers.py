@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 from datetime import date, datetime
 
+from commons.functions import get_month_end
 from django.core.management.base import BaseCommand
 from houses.models import PerformanceSchedule
 
@@ -45,15 +46,7 @@ class Command(BaseCommand):
         month = target_date.month
         month_start = date(year, month, 1)
 
-        # Calculate next month for range
-        if month == 12:  # noqa: PLR2004
-            next_month = 1
-            next_year = year + 1
-        else:
-            next_month = month + 1
-            next_year = year
-
-        month_end = date(next_year, next_month, 1)
+        month_end = get_month_end(month_start)
 
         # Get all performances in the target month
         performances = PerformanceSchedule.objects.filter(
