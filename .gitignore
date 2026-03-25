@@ -224,7 +224,6 @@ cache/
 output/
 notebooks/*.jpg
 
-CLAUDE.md
 client_secret.json
 secrets.json
 malcom/data/*
