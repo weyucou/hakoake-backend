@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import requests
 
-from .normalization import normalize_performer_name
+from .normalization import channel_name_matches
 
 if TYPE_CHECKING:
     from .models import Performer, PerformerSong
@@ -219,22 +219,11 @@ class YouTubeSearcher:
     def channel_matches_performer(self, performer_name: str, channel_name: str, channel_id: str) -> bool:
         """Check if a YouTube channel belongs to the performer.
 
-        Checks normalized channel name first (preferred), then falls back to
-        the channel page description.
+        Delegates to the shared channel_name_matches() which provides
+        substring, fuzzy, and description matching.
         """
-        normalized_performer = normalize_performer_name(performer_name)
-        normalized_channel = normalize_performer_name(channel_name)
-
-        if normalized_performer in normalized_channel:
-            return True
-
-        if channel_id:
-            description = self._fetch_channel_description(channel_id)
-            normalized_description = normalize_performer_name(description)
-            if normalized_performer in normalized_description:
-                return True
-
-        return False
+        description = self._fetch_channel_description(channel_id) if channel_id else ""
+        return channel_name_matches(performer_name, channel_name, description)
 
     def _fetch_channel_description(self, channel_id: str) -> str:
         """Fetch a YouTube channel's description from its page metadata."""

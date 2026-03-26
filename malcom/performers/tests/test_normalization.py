@@ -3,7 +3,7 @@
 from django.test import TestCase
 
 from performers.models import Performer
-from performers.normalization import find_existing_performer, normalize_performer_name
+from performers.normalization import channel_name_matches, find_existing_performer, normalize_performer_name
 
 
 class TestNormalizePerformerName(TestCase):
@@ -100,3 +100,61 @@ class TestFindExistingPerformer(TestCase):
     def test_bom_variant(self) -> None:
         p = _create_performer("RAN")
         self.assertEqual(find_existing_performer("\ufeffRAN"), p)
+
+
+class TestChannelNameMatches(TestCase):
+    """Unit tests for channel_name_matches (no DB required)."""
+
+    # Tier 1: substring containment
+    def test_exact_match(self) -> None:
+        self.assertTrue(channel_name_matches("THE MAGNETS", "THE MAGNETS", ""))
+
+    def test_performer_in_channel(self) -> None:
+        self.assertTrue(channel_name_matches("AKIARIM", "AKIARIM OFFICIAL CHANNEL", ""))
+
+    def test_channel_in_performer(self) -> None:
+        self.assertTrue(channel_name_matches("The R.O.X & GWO", "The R.O.X", ""))
+
+    # Tier 2: fuzzy match with suffix stripping
+    def test_fuzzy_spacing(self) -> None:
+        """Names differing only by spaces should match."""
+        self.assertTrue(channel_name_matches("2ndunite", "2nd unite", ""))
+
+    def test_fuzzy_spacing_cherry(self) -> None:
+        self.assertTrue(channel_name_matches("CHERRY NADE 169", "CHERRYNADE169", ""))
+
+    def test_fuzzy_official_suffix(self) -> None:
+        """Channel with 'official' suffix should match."""
+        self.assertTrue(channel_name_matches("urei", "urei official", ""))
+
+    def test_fuzzy_topic_suffix(self) -> None:
+        """YouTube '- Topic' auto-generated channels should match."""
+        self.assertTrue(channel_name_matches("Sadamori Kouki Band", "Sadamori Kouki - Topic", ""))
+
+    def test_fuzzy_vevo_suffix(self) -> None:
+        self.assertTrue(channel_name_matches("Dope Flamingo", "DopeFlamingo VEVO", ""))
+
+    def test_fuzzy_typo(self) -> None:
+        """Minor typo in performer name should still match."""
+        self.assertTrue(channel_name_matches("XOXO EXTRIME", "XOXO EXTREME Channnel", ""))
+
+    def test_fuzzy_katakana_spacing(self) -> None:
+        """Japanese names with punctuation differences should match."""
+        self.assertTrue(channel_name_matches("サムライ・シバ・ロック", "サムライシバロック", ""))
+
+    # Tier 3: description fallback
+    def test_description_match(self) -> None:
+        self.assertTrue(channel_name_matches("MyBand", "SomeLabel", "Official channel of MyBand"))
+
+    # Negative cases
+    def test_unrelated_channel(self) -> None:
+        self.assertFalse(channel_name_matches("0mg", "HYBE LABELS", ""))
+
+    def test_unrelated_short_name(self) -> None:
+        self.assertFalse(channel_name_matches("CAL", "Vulf", ""))
+
+    def test_unrelated_japanese(self) -> None:
+        self.assertFalse(channel_name_matches("ANTENA", "Mrs. GREEN APPLE", ""))
+
+    def test_empty_performer(self) -> None:
+        self.assertFalse(channel_name_matches("", "SomeChannel", ""))
