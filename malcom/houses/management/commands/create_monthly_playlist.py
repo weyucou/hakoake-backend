@@ -24,6 +24,7 @@ from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry
 from houses.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from performers.models import Performer, PerformerSong
@@ -168,6 +169,12 @@ class Command(BaseCommand):
                 ),
             )
 
+        lineup_lines = build_lineup_lines(selected_songs, month_start, month_end)
+
+        self.stdout.write("\nPlaylist lineup:")
+        for line in lineup_lines:
+            self.stdout.write(f"  - {line}")
+
         if dry_run:
             self.stdout.write(self.style.SUCCESS("\n=== DRY RUN - No changes made ==="))
             self.stdout.write(f"Would create playlist with {len(selected_songs)} songs")
@@ -181,28 +188,8 @@ class Command(BaseCommand):
         month_name = target_date.strftime("%B").upper()
         year = target_date.strftime("%Y")
         playlist_title = f"HAKKO-AKKEI {month_name} {year} TOKYO Playlist Introduction"
-
-        # Build description
-        tags = (
-            "indies",
-            "indierock",
-            "punk",
-            "punkrock",
-            "garagerock",
-            "インディーズ",
-            "インディーズバンド",
-            "underground",
-            "alternative",
-            "alternativerock",
-            "emorock",
-            "jrock",
-        )
-        tags_str = "\n".join(f"#{t}" for t in tags)
         month_name = target_date.strftime("%B")
-
-        playlist_description = f"""Discover bands performing in TOKYO Live Houses for {month_name} {year}.
-
-{tags_str}"""
+        playlist_description = build_playlist_description(f"{month_name} {year}", "\n".join(lineup_lines))
 
         try:
             youtube_playlist_id = create_youtube_playlist(playlist_title, playlist_description, secrets_file)

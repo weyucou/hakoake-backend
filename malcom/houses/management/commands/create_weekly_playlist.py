@@ -26,6 +26,7 @@ from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import WeeklyPlaylist, WeeklyPlaylistEntry
 from houses.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from performers.models import Performer, PerformerSocialLink, PerformerSong
@@ -203,6 +204,12 @@ class Command(BaseCommand):
             )
             return
 
+        lineup_lines = build_lineup_lines(selected_songs, week_start, week_end)
+
+        self.stdout.write("\nPlaylist lineup:")
+        for line in lineup_lines:
+            self.stdout.write(f"  - {line}")
+
         if dry_run:
             self.stdout.write(self.style.SUCCESS("\n=== DRY RUN - No changes made ==="))
             self.stdout.write(f"Would create playlist with {len(selected_songs)} songs")
@@ -215,27 +222,7 @@ class Command(BaseCommand):
         # Create YouTube playlist
         week_date_str = target_date.strftime("%Y-%m-%d")
         playlist_title = f"HAKKO-AKKEI WEEK {week_date_str} TOKYO Playlist"
-
-        # Build description
-        tags = (
-            "indies",
-            "indierock",
-            "punk",
-            "punkrock",
-            "garagerock",
-            "インディーズ",
-            "インディーズバンド",
-            "underground",
-            "alternative",
-            "alternativerock",
-            "emorock",
-            "jrock",
-        )
-        tags_str = "\n".join(f"#{t}" for t in tags)
-
-        playlist_description = f"""Discover bands performing in TOKYO Live Houses for week of {week_date_str}.
-
-{tags_str}"""
+        playlist_description = build_playlist_description(f"week of {week_date_str}", "\n".join(lineup_lines))
 
         try:
             youtube_playlist_id = create_youtube_playlist(playlist_title, playlist_description, secrets_file)

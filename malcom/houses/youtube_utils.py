@@ -83,6 +83,24 @@ def create_youtube_playlist(title: str, description: str, client_secrets_file: P
     return playlist_id
 
 
+def update_youtube_playlist(playlist_id: str, title: str, description: str, client_secrets_file: Path) -> None:
+    """Update an existing YouTube playlist's title and description."""
+    youtube = get_authorized_youtube_client(client_secrets_file)
+
+    request = youtube.playlists().update(
+        part="snippet",
+        body={
+            "id": playlist_id,
+            "snippet": {
+                "title": title,
+                "description": description,
+            },
+        },
+    )
+    request.execute()
+    logger.info(f"Updated YouTube playlist: {title} (ID: {playlist_id})")
+
+
 def add_video_to_playlist(playlist_id: str, video_id: str, client_secrets_file: Path) -> bool:
     """Add a video to a YouTube playlist."""
     youtube = get_authorized_youtube_client(client_secrets_file)

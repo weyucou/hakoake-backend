@@ -18,6 +18,21 @@ MAX_SOCIAL_LINKS = 5
 MAX_CONTEXT_CHARS = 200
 MAX_PERFORMERS_IN_CONTEXT = 3
 
+PLAYLIST_TAGS = (
+    "indies",
+    "indierock",
+    "punk",
+    "punkrock",
+    "garagerock",
+    "インディーズ",
+    "インディーズバンド",
+    "underground",
+    "alternative",
+    "alternativerock",
+    "emorock",
+    "jrock",
+)
+
 
 class WebsiteProcessingState(StringEnumWithChoices):
     """Enum representing the state of website processing."""
