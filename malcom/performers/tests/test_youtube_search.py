@@ -3,10 +3,10 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from commons.youtube_search import YouTubeSearcher, search_and_create_performer_songs
 from django.test import TestCase
 
 from performers.models import Performer, PerformerSocialLink
-from performers.youtube_search import YouTubeSearcher, search_and_create_performer_songs
 
 
 def _create_performer(name: str) -> Performer:
@@ -124,8 +124,8 @@ class TestSearchAndCreatePerformerSongsChannelValidation(TestCase):
             },
         ]
 
-    @patch("performers.youtube_search.YouTubeSearcher.search_most_popular_videos")
-    @patch("performers.youtube_search.YouTubeSearcher.channel_matches_performer")
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    @patch("commons.youtube_search.YouTubeSearcher.channel_matches_performer")
     def test_social_link_not_created_when_channel_does_not_match(
         self, mock_matches: MagicMock, mock_search: MagicMock
     ) -> None:
@@ -138,8 +138,8 @@ class TestSearchAndCreatePerformerSongsChannelValidation(TestCase):
         self.assertEqual(len(songs), 1)
         self.assertFalse(PerformerSocialLink.objects.filter(performer=performer, platform="youtube").exists())
 
-    @patch("performers.youtube_search.YouTubeSearcher.search_most_popular_videos")
-    @patch("performers.youtube_search.YouTubeSearcher.channel_matches_performer")
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    @patch("commons.youtube_search.YouTubeSearcher.channel_matches_performer")
     def test_social_link_created_when_channel_matches(self, mock_matches: MagicMock, mock_search: MagicMock) -> None:
         performer = _create_performer("RAN")
         mock_search.return_value = self._make_video_data()
@@ -152,8 +152,8 @@ class TestSearchAndCreatePerformerSongsChannelValidation(TestCase):
         self.assertEqual(link.platform_id, "UC123")
         self.assertEqual(link.url, "https://www.youtube.com/channel/UC123")
 
-    @patch("performers.youtube_search.YouTubeSearcher.search_most_popular_videos")
-    @patch("performers.youtube_search.YouTubeSearcher.channel_matches_performer")
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    @patch("commons.youtube_search.YouTubeSearcher.channel_matches_performer")
     def test_second_video_channel_checked_when_first_does_not_match(
         self, mock_matches: MagicMock, mock_search: MagicMock
     ) -> None:

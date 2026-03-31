@@ -1,8 +1,8 @@
 import logging
 from pathlib import Path
 
+from commons.youtube_utils import get_authorized_youtube_client
 from django.core.management.base import BaseCommand, CommandParser
-from houses.youtube_utils import get_authorized_youtube_client
 
 from performers.models import Performer, PerformerSocialLink, PerformerSong
 

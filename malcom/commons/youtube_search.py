@@ -5,11 +5,10 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import requests
-
-from .normalization import channel_name_matches
+from performers.normalization import channel_name_matches
 
 if TYPE_CHECKING:
-    from .models import Performer, PerformerSong
+    from performers.models import Performer, PerformerSong
 
 logger = logging.getLogger(__name__)
 
@@ -347,7 +346,7 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
     Returns:
         List of created PerformerSong instances
     """
-    from .models import PerformerSocialLink, PerformerSong  # noqa: PLC0415
+    from performers.models import PerformerSocialLink, PerformerSong  # noqa: PLC0415
 
     # Check if performer already has songs to avoid duplicates
     if performer.songs.filter(youtube_video_id__isnull=False).exclude(youtube_video_id="").exists():

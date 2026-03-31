@@ -1,5 +1,6 @@
 import logging
 
+from commons.youtube_search import search_and_create_performer_songs
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError
@@ -9,7 +10,6 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from .models import PerformerSocialLink
-from .youtube_search import search_and_create_performer_songs
 
 logger = logging.getLogger(__name__)
 

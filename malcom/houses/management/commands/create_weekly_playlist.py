@@ -21,6 +21,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from commons.functions import parse_week
+from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
@@ -28,7 +29,6 @@ from django.db.models import F
 from django.utils import timezone
 from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import WeeklyPlaylist, WeeklyPlaylistEntry
-from houses.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from performers.models import Performer, PerformerSocialLink, PerformerSong
 
 logger = logging.getLogger(__name__)

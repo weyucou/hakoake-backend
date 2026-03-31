@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 
 from commons.functions import get_month_end, parse_month
+from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
@@ -26,7 +27,6 @@ from django.db.models import F
 from django.utils import timezone
 from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry
-from houses.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from performers.models import Performer, PerformerSong
 
 logger = logging.getLogger(__name__)

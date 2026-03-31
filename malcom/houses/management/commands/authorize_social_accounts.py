@@ -8,10 +8,10 @@ Usage:
 
 import logging
 
+from commons.instagram_utils import get_instagram_token
+from commons.threads_utils import get_threads_token
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
-from houses.instagram_utils import get_instagram_token
-from houses.threads_utils import get_threads_token
 
 logger = logging.getLogger(__name__)
 
