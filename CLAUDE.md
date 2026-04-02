@@ -52,9 +52,9 @@ This project uses `ruff` with `select = ["ALL"]`. Tests must follow these rules 
 
 ## Django Shell Output
 
-`manage.py shell -c "..."` prints a startup line before the value (e.g. `19 objects imported automatically`). Always pipe through `tail -1` when capturing output:
+`manage.py shell -c "..."` prints a startup line before the value (e.g. `19 objects imported automatically`). Prefer dedicated management commands with `--json` output over `shell -c` hacks. Parse JSON output with `jq` (`jq` is installed):
 ```bash
-value=$(uv run python manage.py shell -c "print(Model.objects.get(...).id)" | tail -1)
+value=$(uv run python manage.py my_command --json | jq -r '.field')
 ```
 
 ## Crawler Development
