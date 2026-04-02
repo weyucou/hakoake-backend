@@ -24,8 +24,7 @@ cd "$HAKOAKE_DIR"
 uv run python manage.py create_weekly_playlist "$MONDAY"
 
 echo "Looking up playlist DB id for ${MONDAY}..."
-playlist_db_id=$(uv run python manage.py shell -c "from houses.models import WeeklyPlaylist; print(WeeklyPlaylist.objects.get(date='${MONDAY}').id)")
-playlist_db_id=$(echo "$playlist_db_id" | tr -d '[:space:]')
+playlist_db_id=$(uv run python manage.py shell -c "from houses.models import WeeklyPlaylist; print(WeeklyPlaylist.objects.get(date='${MONDAY}').id)" | tail -1)
 
 echo "Generating weekly playlist video for playlist id=${playlist_db_id}..."
 uv run python manage.py generate_weekly_playlist_video "$playlist_db_id"
