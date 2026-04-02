@@ -24,7 +24,7 @@ cd "$HAKOAKE_DIR"
 uv run python manage.py create_weekly_playlist "$MONDAY"
 
 echo "Looking up playlist DB id for ${MONDAY}..."
-playlist_db_id=$(uv run python manage.py list_weekly_playlist "$MONDAY" --json | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
+playlist_db_id=$(uv run python manage.py list_weekly_playlist "$MONDAY" --json | jq -r '.id')
 
 echo "Generating weekly playlist video for playlist id=${playlist_db_id}..."
 uv run python manage.py generate_weekly_playlist_video "$playlist_db_id"
