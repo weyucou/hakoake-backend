@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 from django.utils import timezone
 
@@ -205,7 +206,7 @@ class DaisyBarCrawler(LiveHouseWebsiteCrawler):
         if not performers:
             return None
 
-        return {
+        schedule: dict = {
             "date": date_str,
             "open_time": open_time,
             "start_time": start_time,
@@ -214,6 +215,10 @@ class DaisyBarCrawler(LiveHouseWebsiteCrawler):
             "presale_price": presale_price,
             "door_price": door_price,
         }
+        img = article.find("img", src=True)
+        if img:
+            schedule["event_image_url"] = urljoin(self.base_url, img["src"])
+        return schedule
 
     def _parse_container_events(self, containers: list) -> list[dict]:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """Parse events from specific containers."""

@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 from performers.models import Performer, PerformerSocialLink
@@ -385,6 +386,7 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         performance = self._create_or_get_schedule(live_house, perf_date, open_time, start_time, data)
         self._save_and_link_performers(performance, valid_performers)
         self._extract_and_save_ticket_info(performance, data)
+        self._extract_and_save_event_image(performance, data)
         return performance
 
     def _parse_schedule_times(self, data: dict) -> tuple[date, time | None, time | None]:
@@ -522,6 +524,25 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             ticket_info = self.extract_ticket_info("", data["context"])
             if ticket_info:
                 self._create_or_update_ticket_info(performance, ticket_info)
+
+    def _extract_and_save_event_image(self, performance: PerformanceSchedule, data: dict) -> None:
+        """Download and save event image if URL is provided in schedule data."""
+        event_image_url = data.get("event_image_url")
+        if event_image_url:
+            self._save_event_image(event_image_url, performance)
+
+    def _save_event_image(self, url: str, performance: PerformanceSchedule) -> None:
+        """Download image from URL and save it to the performance's event_image field."""
+        if performance.event_image:
+            return  # Already has an image
+        try:
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            filename = url.split("/")[-1].split("?")[0] or f"event_{performance.pk}.jpg"
+            performance.event_image.save(filename, ContentFile(response.content), save=True)
+            logger.info(f"Saved event image for {performance} from {url}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Failed to download event image from {url}: {exc}")
 
     # Generic helper methods that concrete implementations can use
     def _generic_extract_live_house_info(self, html_content: str) -> dict[str, str]:  # noqa: C901, PLR0912, PLR0915

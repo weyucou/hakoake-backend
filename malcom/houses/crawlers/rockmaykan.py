@@ -234,13 +234,20 @@ class RockmaykanCrawler(LiveHouseWebsiteCrawler):
             logger.debug(f"No performers found for event on {date_str}")
             return None
 
-        return {
+        schedule: dict = {
             "date": date_str,
             "open_time": open_time,
             "start_time": start_time,
             "performers": performers[:8],
             "performance_name": event_name,
         }
+        # Look for event image in the H4 or adjacent siblings
+        for sibling in [h4_element, table]:
+            img = sibling.find("img", src=True) if sibling else None
+            if img:
+                schedule["event_image_url"] = urljoin(self.base_url, img["src"])
+                break
+        return schedule
 
     def _clean_rockmaykan_performer(self, name: str) -> str:
         """Clean a Rockmaykan performer name."""

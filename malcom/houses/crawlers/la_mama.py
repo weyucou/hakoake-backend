@@ -1,5 +1,6 @@
 import logging
 import re
+from urllib.parse import urljoin
 
 from django.utils import timezone
 
@@ -159,13 +160,17 @@ class LaMamaCrawler(LiveHouseWebsiteCrawler):
         if not performers:
             return None
 
-        return {
+        schedule: dict = {
             "date": date_str,
             "open_time": open_time,
             "start_time": start_time,
             "performers": performers[:8],
             "performance_name": event_name,
         }
+        img = event_link.find("img", src=True)
+        if img:
+            schedule["event_image_url"] = urljoin("https://www.lamama.net", img["src"])
+        return schedule
 
     def find_next_month_link(self, html_content: str) -> str | None:
         """Find the link to next month's schedule page."""

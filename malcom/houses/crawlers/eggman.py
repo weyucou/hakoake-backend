@@ -195,6 +195,9 @@ class EggmanCrawler(LiveHouseWebsiteCrawler):
                     "context": context,
                     "performance_name": performance_name,
                 }
+                img = article.find("img", src=True)
+                if img:
+                    schedule["event_image_url"] = urljoin(self.base_url, img["src"])
                 schedules.append(schedule)
 
         return schedules

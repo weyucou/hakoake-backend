@@ -51,6 +51,12 @@ class PerformanceSchedule(models.Model):
     presale_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # noqa: DJ001
     door_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # noqa: DJ001
     performers = models.ManyToManyField(Performer, related_name="performance_schedules", blank=True)
+    event_image = models.ImageField(
+        upload_to="schedules/event_images/",
+        blank=True,
+        null=True,
+        help_text="Event flyer or promotional image",
+    )
 
     def __str__(self) -> str:
         return f"{self.live_house.name} - {self.performance_date} {self.start_time}"

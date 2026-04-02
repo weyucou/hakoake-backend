@@ -93,6 +93,7 @@ class AntiknockCrawler(LiveHouseWebsiteCrawler):
 
                 # If no performers found or names are truncated (contain "…"), fetch the detail page
                 has_truncation = any("…" in p for p in performers)
+                event_image_url = None
                 if not performers or has_truncation:
                     detail_url = urljoin(self.base_url, href)
                     try:
@@ -100,6 +101,7 @@ class AntiknockCrawler(LiveHouseWebsiteCrawler):
                         if detail_html:
                             performers = self._extract_performers_from_detail_page(detail_html)
                             logger.debug(f"Extracted performers from detail page: {performers}")
+                            event_image_url = self._extract_image_from_detail_page(detail_html)
                     except Exception:  # noqa: BLE001
                         logger.exception(f"Failed to fetch detail page: {detail_url}")
 
@@ -115,6 +117,8 @@ class AntiknockCrawler(LiveHouseWebsiteCrawler):
                         "context": context,
                         "performance_name": self._extract_event_title(event_text),
                     }
+                    if event_image_url:
+                        schedule_data["event_image_url"] = event_image_url
                     schedules.append(schedule_data)
 
                     logger.debug(f"Extracted antiknock event: {formatted_date} - {performers}")
@@ -315,6 +319,17 @@ class AntiknockCrawler(LiveHouseWebsiteCrawler):
 
         max_performers = 10
         return performers[:max_performers]  # Limit to reasonable number
+
+    def _extract_image_from_detail_page(self, html_content: str) -> str | None:
+        """Extract event flyer image URL from antiknock detail page."""
+        soup = self.create_soup(html_content)
+        for img in soup.find_all("img", src=True):
+            src = img["src"]
+            # Skip small icons/logos; look for flyer-like images
+            if any(skip in src.lower() for skip in ["icon", "logo", "arrow", "btn", "button", "nav"]):
+                continue
+            return urljoin(self.base_url, src)
+        return None
 
     def _extract_event_title(self, event_text: str) -> str | None:  # noqa: C901, PLR0912, PLR0915, PLR0911
         """Extract event title from antiknock event text."""

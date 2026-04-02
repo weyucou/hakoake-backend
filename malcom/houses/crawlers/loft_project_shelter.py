@@ -118,7 +118,7 @@ class LoftProjectShelterCrawler(LiveHouseWebsiteCrawler):
 
         return schedules
 
-    def _parse_event_link(self, link: Tag) -> dict | None:
+    def _parse_event_link(self, link: Tag) -> dict | None:  # noqa: C901, PLR0912
         """Parse a single event link element to extract schedule data."""
         divs = link.find_all("div", recursive=False)
         if len(divs) < 4:  # noqa: PLR2004
@@ -162,12 +162,16 @@ class LoftProjectShelterCrawler(LiveHouseWebsiteCrawler):
         if not performers:
             return None
 
-        return {
+        schedule: dict = {
             "date": f"{year}-{month:02d}-{day:02d}",
             "open_time": open_time,
             "start_time": start_time,
             "performers": performers[:10],
         }
+        img = link.find("img", src=True)
+        if img:
+            schedule["event_image_url"] = urljoin(self.website.url, img["src"])
+        return schedule
 
     def _process_schedule_container(self, container: BeautifulSoup) -> list[dict]:  # noqa: PLR0912
         """Process a single schedule container to extract events."""

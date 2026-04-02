@@ -419,17 +419,26 @@ class ShinjukuMarbleCrawler(LiveHouseWebsiteCrawler):
             # Extract times
             times = self._extract_marble_times(event_text)
 
-            return {
+            schedule: dict = {
                 "date": date_str,
                 "open_time": times["open_time"],
                 "start_time": times["start_time"],
                 "performers": performers[:8],  # Limit to 8
                 "performance_name": event_name,
             }
+            # Look for event flyer image on the detail page
+            for img in soup.find_all("img", src=True):
+                src = img["src"]
+                if any(skip in src.lower() for skip in ["icon", "logo", "arrow", "btn", "button", "nav", "header"]):
+                    continue
+                schedule["event_image_url"] = urljoin(self.base_url, src)
+                break
 
         except Exception:  # noqa: BLE001
             logger.exception("Error extracting from detail page")
             return None
+        else:
+            return schedule
 
     def find_next_month_link(self, html_content: str) -> str | None:
         """Find next month link for Shinjuku Marble website."""

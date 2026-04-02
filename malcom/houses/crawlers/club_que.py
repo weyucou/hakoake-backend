@@ -155,7 +155,7 @@ class ClubQueCrawler(LiveHouseWebsiteCrawler):
                 logger.debug(f"No performers found for {date_str}")
                 return None
 
-            return {
+            schedule: dict = {
                 "date": date_str,
                 "open_time": open_time,
                 "start_time": start_time,
@@ -164,10 +164,24 @@ class ClubQueCrawler(LiveHouseWebsiteCrawler):
                 "presale_price": presale_price,
                 "door_price": door_price,
             }
+            event_image_url = self._extract_event_image(soup)
+            if event_image_url:
+                schedule["event_image_url"] = event_image_url
 
         except Exception:  # noqa: BLE001
             logger.exception("Error extracting from Club Que detail page")
             return None
+        else:
+            return schedule
+
+    def _extract_event_image(self, soup: "Tag") -> str | None:
+        """Extract event flyer image URL from Club Que detail page."""
+        for img in soup.find_all("img", src=True):
+            src = img["src"]
+            if any(skip in src.lower() for skip in ["icon", "logo", "arrow", "btn", "button", "nav", "header"]):
+                continue
+            return urljoin(self.base_url, src)
+        return None
 
     def _should_skip_line(self, line_text: str) -> bool:
         """Check if a line should be skipped during performer extraction."""
