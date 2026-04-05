@@ -3,15 +3,18 @@
 Generates two types of images:
 - Playlist cover: numbered artist list with hakoake branding
 - Performer card: performer photo/art + event details overlay
+- QR code slide: QR code + metadata overlay for Instagram carousel
 """
 
 from __future__ import annotations
 
 import io
 import logging
+from datetime import date  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import qrcode
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 if TYPE_CHECKING:
@@ -273,6 +276,126 @@ def generate_performer_card(
         font=_font(22),
         fill=(100, 100, 120),
         anchor="rb",
+    )
+
+    return _to_jpeg(img)
+
+
+def generate_qr_code(url: str, size: int = 300) -> Image.Image:
+    """Generate a QR code image for the given URL."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white")
+    return qr_img.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def _resize_to_square(raw_bytes: bytes, size: int = 1080) -> bytes:
+    """Center-crop raw image bytes to a square JPEG of the given size."""
+    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    w, h = img.size
+    min_dim = min(w, h)
+    x = (w - min_dim) // 2
+    y = (h - min_dim) // 2
+    cropped = img.crop((x, y, x + min_dim, y + min_dim))
+    resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
+    return _to_jpeg(resized)
+
+
+def generate_qr_slide(
+    url: str,
+    position: int,
+    performer_name: str,
+    venue_name: str,
+    event_name: str,
+    event_date: date,
+) -> bytes:
+    """Generate a 1080x1080 QR code slide with metadata overlay. Returns JPEG bytes.
+
+    Args:
+        url: QR code target URL
+        position: Performer position index in the playlist
+        performer_name: Performer name
+        venue_name: Live house name
+        event_name: PerformanceSchedule.performance_name
+        event_date: PerformanceSchedule.performance_date
+    """
+    img = Image.new("RGB", (IMG_W, IMG_H), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    # --- Top accent bar ---
+    draw.rectangle([(0, 0), (IMG_W, 8)], fill=ACCENT_COLOR)
+
+    # --- Branding ---
+    font_brand = _font(36, bold=True)
+    draw.text((IMG_W // 2, 40), "HAKKO-AKKEI", font=font_brand, fill=ACCENT_COLOR, anchor="mt")
+
+    # --- QR code centered in upper portion ---
+    qr_size = 400
+    qr_img = generate_qr_code(url, qr_size)
+    qr_x = (IMG_W - qr_size) // 2
+    qr_y = 100
+    img.paste(qr_img, (qr_x, qr_y))
+
+    # --- Divider below QR ---
+    divider_y = qr_y + qr_size + 20
+    draw.rectangle([(80, divider_y), (IMG_W - 80, divider_y + 2)], fill=DIVIDER_COLOR)
+
+    # --- Metadata text ---
+    text_y = divider_y + 24
+
+    # Position badge + performer name on same line
+    badge_r = 26
+    badge_cx = 80 + badge_r
+    badge_cy = text_y + badge_r
+    draw.ellipse(
+        [(badge_cx - badge_r, badge_cy - badge_r), (badge_cx + badge_r, badge_cy + badge_r)],
+        fill=ACCENT_COLOR,
+    )
+    draw.text((badge_cx, badge_cy), str(position), font=_font(26, bold=True), fill=TEXT_COLOR, anchor="mm")
+
+    font_name = _font(52, bold=True)
+    draw.text((80 + badge_r * 2 + 16, badge_cy), performer_name, font=font_name, fill=TEXT_COLOR, anchor="lm")
+    text_y += badge_r * 2 + 16
+
+    # Venue
+    font_detail = _font(34)
+    draw.text((IMG_W // 2, text_y), f"📍 {venue_name}", font=font_detail, fill=SECONDARY_COLOR, anchor="mt")
+    text_y += 50
+
+    # Event name (if set)
+    if event_name:
+        font_event = _font(30)
+        lines = _text_wrapped(draw, event_name, font_event, IMG_W - 160)
+        for line in lines[:2]:
+            draw.text((IMG_W // 2, text_y), line, font=font_event, fill=DIM_COLOR, anchor="mt")
+            text_y += 40
+
+    # Event date
+    font_date = _font(34, bold=True)
+    draw.text(
+        (IMG_W // 2, text_y),
+        f"📅 {event_date.strftime('%Y-%m-%d (%a)')}",
+        font=font_date,
+        fill=ACCENT_COLOR,
+        anchor="mt",
+    )
+
+    # --- Bottom accent bar ---
+    draw.rectangle([(0, IMG_H - 8), (IMG_W, IMG_H)], fill=ACCENT_COLOR)
+
+    # --- Scan label above bottom bar ---
+    draw.text(
+        (IMG_W // 2, IMG_H - 40),
+        "Scan QR code for details",
+        font=_font(26),
+        fill=SECONDARY_COLOR,
+        anchor="mm",
     )
 
     return _to_jpeg(img)

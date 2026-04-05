@@ -15,7 +15,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-import qrcode
+from commons.instagram_images import generate_qr_code
 from django.core.management import BaseCommand, CommandParser
 from houses.models import PerformanceSchedule, WeeklyPlaylist
 from PIL import Image, ImageDraw, ImageFont
@@ -54,22 +54,6 @@ def get_font(size: int, bold: bool = False) -> ImageFont.ImageFont | ImageFont.F
     except Exception:  # noqa: BLE001
         logger.warning(f"Could not load custom font, using default (size {size})")
         return ImageFont.load_default()
-
-
-def generate_qr_code(url: str, size: int = 300) -> Image.Image:
-    """Generate a QR code image for the given URL."""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=2,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_img = qr_img.resize((size, size), Image.Resampling.LANCZOS)
-    return qr_img
 
 
 def create_artist_slide(
