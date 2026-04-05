@@ -78,11 +78,16 @@ class TestPostWeeklyPlaylistCommand(TestCase):
         call_command("post_weekly_playlist", "--playlist-id=99999", "--dry-run", stderr=err)
         self.assertIn("not found", err.getvalue())
 
-    def test_max_performers_exceeded_exits_gracefully(self) -> None:
-        err = StringIO()
-        # max_performers=5 -> 11 slides, over the limit of 10
-        call_command("post_weekly_playlist", "--max-performers=5", "--dry-run", stderr=err)
-        self.assertIn("slides", err.getvalue())
+    def test_truncates_to_max_when_entries_exceed_limit(self) -> None:
+        # Add enough entries to exceed the 4-performer carousel cap
+        for i in range(2, 7):
+            song = _make_song(self.performer, title=f"Extra Song {i}", video_id=f"extra{i}")
+            WeeklyPlaylistEntry.objects.create(playlist=self.playlist, song=song, position=i)
+
+        out = StringIO()
+        with self.assertLogs("houses.management.commands.post_weekly_playlist", level="WARNING") as cm:
+            call_command("post_weekly_playlist", "--dry-run", stdout=out)
+        self.assertTrue(any("truncating" in msg for msg in cm.output))
 
     def test_uses_latest_playlist_when_no_id_given(self) -> None:
         newer_playlist = WeeklyPlaylist.objects.create(

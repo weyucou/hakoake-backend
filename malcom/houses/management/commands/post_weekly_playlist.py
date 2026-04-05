@@ -9,7 +9,7 @@ Usage:
     uv run python manage.py post_weekly_playlist
     uv run python manage.py post_weekly_playlist --playlist-id 42
     uv run python manage.py post_weekly_playlist --dry-run
-    uv run python manage.py post_weekly_playlist --platform instagram --max-performers 3
+    uv run python manage.py post_weekly_playlist --platform instagram
 """
 
 from __future__ import annotations
@@ -52,6 +52,20 @@ PLATFORM_HANDLERS = {
     "instagram": _post_instagram,
 }
 
+VALID_POST_PLATFORMS = list(PLATFORM_HANDLERS)
+
+
+def _get_qr_url(schedule) -> str:  # noqa: ANN001
+    """Return the ticket or venue schedule URL for the QR code slide."""
+    if not schedule:
+        return ""
+    try:
+        if schedule.ticket_purchase_info.ticket_url:
+            return str(schedule.ticket_purchase_info.ticket_url)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return schedule.live_house.website.schedule_url or ""
+
 
 class Command(BaseCommand):
     help = "Post a weekly playlist announcement as a multi-image carousel"
@@ -65,7 +79,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--platform",
-            choices=list(PLATFORM_HANDLERS),
+            choices=VALID_POST_PLATFORMS,
             default="instagram",
             help="Posting target (default: instagram)",
         )
@@ -74,36 +88,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Log images and caption without posting",
         )
-        parser.add_argument(
-            "--base-url",
-            default="https://hakoake.com",
-            help="Base URL for QR code links (default: https://hakoake.com)",
-        )
-        parser.add_argument(
-            "--max-performers",
-            type=int,
-            default=4,
-            help="Max performers to include; controls slide count (default: 4)",
-        )
 
     def handle(self, *args, **options) -> None:  # noqa: ANN002, ANN003, PLR0912, PLR0915
         playlist_id: int | None = options["playlist_id"]
         platform: str = options["platform"]
         dry_run: bool = options["dry_run"]
-        base_url: str = options["base_url"].rstrip("/")
-        max_performers: int = options["max_performers"]
-
-        # Validate slide count before doing any work
-        total_slides = 1 + max_performers * 2
-        if total_slides > MAX_CAROUSEL_SLIDES:
-            self.stderr.write(
-                self.style.ERROR(
-                    f"--max-performers {max_performers} would produce {total_slides} slides "
-                    f"(limit is {MAX_CAROUSEL_SLIDES}). "
-                    f"Lower --max-performers to {(MAX_CAROUSEL_SLIDES - 1) // 2} or fewer."
-                )
-            )
-            return
 
         # --- Resolve playlist ---
         if playlist_id:
@@ -125,12 +114,22 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR("Playlist has no entries"))
             return
 
+        max_performers = (MAX_CAROUSEL_SLIDES - 1) // 2
+        if len(entries) > max_performers:
+            logger.warning(
+                "Playlist has %d entries; truncating to %d to stay within %d-slide carousel limit",
+                len(entries),
+                max_performers,
+                MAX_CAROUSEL_SLIDES,
+            )
+            entries = entries[:max_performers]
+
         week_start = playlist.date
         week_end = week_start + timedelta(days=7)
         week_label = f"Week of {week_start.strftime('%Y-%m-%d')}"
 
         self.stdout.write(f"Playlist: {playlist.id} — {week_label}")
-        self.stdout.write(f"Entries: {len(entries)}, max performers: {max_performers}")
+        self.stdout.write(f"Entries: {len(entries)}")
 
         # --- Build caption ---
         performer_song_pairs = [(e.song.performer, e.song) for e in entries]
@@ -156,7 +155,7 @@ class Command(BaseCommand):
         images: list[tuple[bytes, str]] = [(cover_bytes, "cover.jpg")]
 
         # --- Per-performer slides ---
-        for entry in entries[:max_performers]:
+        for entry in entries:
             performer = entry.song.performer
             pos = entry.position
 
@@ -202,7 +201,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Generated flyer for {performer.name} ({len(flyer_bytes):,} bytes)")
 
             # QR code slide
-            qr_url = f"{base_url}/performer/{performer.id}/"
+            qr_url = _get_qr_url(schedule)
             venue_name = schedule.live_house.name if schedule else ""
             event_name = schedule.performance_name if schedule else ""
             event_date = schedule.performance_date if schedule else week_start
