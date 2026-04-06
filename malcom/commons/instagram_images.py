@@ -8,6 +8,7 @@ Generates two types of images:
 
 from __future__ import annotations
 
+import functools
 import io
 import logging
 from datetime import date  # noqa: TC003
@@ -39,6 +40,9 @@ DIVIDER_COLOR = (60, 60, 80)
 # --- Font paths ---
 _FONT_BOLD = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 _FONT_REGULAR = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+
+# --- Fallback background image (used when no performer/flyer image is available) ---
+_FALLBACK_BG = Path(__file__).resolve().parent.parent.parent / "insta-background.png"
 
 INSTAGRAM_HASHTAGS = (
     "hakoake",
@@ -101,29 +105,50 @@ def _load_performer_image(performer: Performer) -> Image.Image | None:
                 path = Path(field_val.path)
                 if path.exists():
                     return Image.open(path).convert("RGB")
-            except Exception as exc:  # noqa: BLE001
+            except OSError as exc:
                 logger.debug(f"Could not load {field} for {performer.name}: {exc}")
     return None
 
 
+def _scale_to_fill(img: Image.Image) -> Image.Image:
+    """Scale-crop image to fill IMG_W × IMG_H."""
+    ratio = max(IMG_W / img.width, IMG_H / img.height)
+    new_w = int(img.width * ratio)
+    new_h = int(img.height * ratio)
+    resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    x = (new_w - IMG_W) // 2
+    y = (new_h - IMG_H) // 2
+    return resized.crop((x, y, x + IMG_W, y + IMG_H))
+
+
+@functools.lru_cache(maxsize=1)
+def _load_fallback_bg() -> Image.Image | None:
+    """Load, scale, and apply 60% opacity to the fallback background. Cached after first call."""
+    try:
+        bg = Image.open(_FALLBACK_BG).convert("RGBA")
+        bg = _scale_to_fill(bg)
+        r, g, b, a = bg.split()
+        bg.putalpha(a.point(lambda v: int(v * 0.6)))
+    except OSError as exc:
+        logger.debug(f"Could not load fallback background {_FALLBACK_BG}: {exc}")
+        return None
+    else:
+        return bg
+
+
 def _fill_background(_img: Image.Image, source: Image.Image | None) -> Image.Image:
-    """Fill canvas with source image (blurred, darkened) or solid BG colour."""
+    """Fill canvas with source image (blurred, darkened) or fallback background at 60% opacity."""
     if source:
-        # Scale to fill, blur, then darken
-        ratio = max(IMG_W / source.width, IMG_H / source.height)
-        new_w = int(source.width * ratio)
-        new_h = int(source.height * ratio)
-        resized = source.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        x = (new_w - IMG_W) // 2
-        y = (new_h - IMG_H) // 2
-        cropped = resized.crop((x, y, x + IMG_W, y + IMG_H))
-        blurred = cropped.filter(ImageFilter.GaussianBlur(radius=8))
-        # Dark overlay
+        blurred = _scale_to_fill(source).filter(ImageFilter.GaussianBlur(radius=8))
         overlay = Image.new("RGBA", (IMG_W, IMG_H), OVERLAY_COLOR)
         base = blurred.convert("RGBA")
         base.alpha_composite(overlay)
         return base.convert("RGB")
-    return Image.new("RGB", (IMG_W, IMG_H), BG_COLOR)
+    base = Image.new("RGBA", (IMG_W, IMG_H), (*BG_COLOR, 255))
+    bg = _load_fallback_bg()
+    if bg is not None:
+        base.alpha_composite(bg)
+    return base.convert("RGB")
 
 
 def generate_playlist_cover(

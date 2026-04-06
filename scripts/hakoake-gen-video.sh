@@ -4,6 +4,7 @@
 # 1. Creates the weekly playlist for the current Monday
 # 2. Looks up the created playlist's DB id
 # 3. Generates the playlist video
+# 4. Posts the Instagram carousel announcement
 set -euo pipefail
 
 export PATH="/home/monkut/.local/bin:$PATH"
@@ -28,5 +29,8 @@ playlist_db_id=$(uv run python manage.py list_weekly_playlist "$MONDAY" --json |
 
 echo "Generating weekly playlist video for playlist id=${playlist_db_id}..."
 uv run python manage.py generate_weekly_playlist_video "$playlist_db_id"
+
+echo "Posting weekly playlist announcement to Instagram..."
+uv run python manage.py post_weekly_playlist --playlist-id="$playlist_db_id"
 
 echo "Done."
