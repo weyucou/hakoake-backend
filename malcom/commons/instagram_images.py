@@ -40,6 +40,9 @@ DIVIDER_COLOR = (60, 60, 80)
 _FONT_BOLD = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 _FONT_REGULAR = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
+# --- Fallback background image (used when no performer/flyer image is available) ---
+_FALLBACK_BG = Path(__file__).resolve().parent.parent.parent / "insta-background.png"
+
 INSTAGRAM_HASHTAGS = (
     "hakoake",
     "tokyo",
@@ -107,7 +110,7 @@ def _load_performer_image(performer: Performer) -> Image.Image | None:
 
 
 def _fill_background(_img: Image.Image, source: Image.Image | None) -> Image.Image:
-    """Fill canvas with source image (blurred, darkened) or solid BG colour."""
+    """Fill canvas with source image (blurred, darkened) or fallback background at 60% opacity."""
     if source:
         # Scale to fill, blur, then darken
         ratio = max(IMG_W / source.width, IMG_H / source.height)
@@ -123,7 +126,25 @@ def _fill_background(_img: Image.Image, source: Image.Image | None) -> Image.Ima
         base = blurred.convert("RGBA")
         base.alpha_composite(overlay)
         return base.convert("RGB")
-    return Image.new("RGB", (IMG_W, IMG_H), BG_COLOR)
+    # No performer/flyer image — composite fallback background at 60% opacity over dark base
+    base = Image.new("RGB", (IMG_W, IMG_H), BG_COLOR).convert("RGBA")
+    if _FALLBACK_BG.exists():
+        try:
+            bg = Image.open(_FALLBACK_BG).convert("RGBA")
+            ratio = max(IMG_W / bg.width, IMG_H / bg.height)
+            new_w = int(bg.width * ratio)
+            new_h = int(bg.height * ratio)
+            bg = bg.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            x = (new_w - IMG_W) // 2
+            y = (new_h - IMG_H) // 2
+            bg = bg.crop((x, y, x + IMG_W, y + IMG_H))
+            r, g, b, a = bg.split()
+            a = a.point(lambda v: int(v * 0.6))  # 60% opacity
+            bg = Image.merge("RGBA", (r, g, b, a))
+            base.alpha_composite(bg)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Could not load fallback background {_FALLBACK_BG}: {exc}")
+    return base.convert("RGB")
 
 
 def generate_playlist_cover(
