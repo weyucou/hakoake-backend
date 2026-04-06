@@ -106,7 +106,7 @@ class Command(BaseCommand):
 
         cert_file = settings.OAUTH_LOCALHOST_CERT
         key_file = settings.OAUTH_LOCALHOST_KEY
-        token_cache = cert_file.parent / "instagram_token.pickle"
+        token_cache = cert_file.parent / "instagram_token.json"
 
         token = get_instagram_token(cert_file, key_file, token_cache)
         self.stdout.write("Instagram token loaded")

@@ -41,7 +41,7 @@ class Command(BaseCommand):
             if not settings.INSTAGRAM_APP_ID or not settings.INSTAGRAM_APP_SECRET:
                 self.stderr.write("INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET must be set in .env")
                 return
-            token_cache = cert_file.parent / "instagram_token.pickle"
+            token_cache = cert_file.parent / "instagram_token.json"
             self.stdout.write("Starting Instagram OAuth flow — a browser window will open...")
             try:
                 token = get_instagram_token(cert_file, key_file, token_cache)
@@ -56,7 +56,7 @@ class Command(BaseCommand):
             if not settings.THREADS_APP_ID or not settings.THREADS_APP_SECRET:
                 self.stderr.write("THREADS_APP_ID and THREADS_APP_SECRET must be set in .env")
                 return
-            token_cache = cert_file.parent / "threads_token.pickle"
+            token_cache = cert_file.parent / "threads_token.json"
             self.stdout.write("Starting Threads OAuth flow — a browser window will open...")
             try:
                 token = get_threads_token(cert_file, key_file, token_cache)
