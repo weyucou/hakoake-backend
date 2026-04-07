@@ -12,7 +12,6 @@ Refresh any time after 24 hours of issuance and before 60-day expiry.
 """
 
 import logging
-import pickle
 import ssl
 import threading
 import webbrowser
@@ -177,15 +176,15 @@ def _load_token(cache_file: Path) -> InstagramToken | None:
     if not cache_file.exists():
         return None
     try:
-        return pickle.loads(cache_file.read_bytes())  # noqa: S301
+        return InstagramToken.model_validate_json(cache_file.read_text())
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Failed to load Instagram token cache: {exc}")
+        logger.warning(f"Failed to load Instagram token cache ({type(exc).__name__}): {exc}")
         return None
 
 
 def _save_token(token: InstagramToken, cache_file: Path) -> None:
     try:
-        cache_file.write_bytes(pickle.dumps(token))
+        cache_file.write_text(token.model_dump_json())
         logger.info(f"Instagram token cached to {cache_file}")
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"Failed to save Instagram token cache: {exc}")

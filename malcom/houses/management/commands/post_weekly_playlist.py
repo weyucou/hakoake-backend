@@ -43,7 +43,7 @@ def _post_instagram(
     cert_file: object,
     key_file: object,
 ) -> str:
-    token_cache = cert_file.parent / "instagram_token.pickle"
+    token_cache = cert_file.parent / "instagram_token.json"
     token = get_instagram_token(cert_file, key_file, token_cache)
     return post_carousel(user_id, token.access_token, images, caption)
 
