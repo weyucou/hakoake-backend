@@ -1,9 +1,51 @@
 """Common utility functions shared across the project."""
 
 import datetime
+import logging
+
+import requests
 
 YYYY_MM_LENGTH = 7
 YYYY_MM_DD_LENGTH = 10
+
+CATBOX_API_URL = "https://catbox.moe/user/api.php"
+
+logger = logging.getLogger(__name__)
+
+
+class CatboxUploadError(RuntimeError):
+    """Raised when a catbox.moe upload fails."""
+
+
+def upload_to_catbox(image_bytes: bytes, filename: str = "image.jpg") -> str:
+    """Upload bytes to catbox.moe anonymously and return the public HTTPS URL.
+
+    catbox.moe accepts a multipart POST with `reqtype=fileupload` and returns the
+    URL as plain text in the response body. No API key or signup required.
+    Used wherever a public HTTPS URL is needed for content that is otherwise
+    only available as in-process bytes (e.g. Instagram `image_url` publishing).
+    """
+    try:
+        response = requests.post(
+            CATBOX_API_URL,
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": (filename, image_bytes, "image/jpeg")},
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise CatboxUploadError(f"catbox upload failed for {filename!r}: {exc}") from exc
+
+    if response.status_code != 200:  # noqa: PLR2004
+        raise CatboxUploadError(
+            f"catbox upload failed for {filename!r}: HTTP {response.status_code} — {response.text[:200]}"
+        )
+
+    url = response.text.strip()
+    if not url.startswith("https://"):
+        raise CatboxUploadError(f"catbox returned unexpected response for {filename!r}: {url[:200]!r}")
+
+    logger.debug(f"Uploaded {filename!r} to catbox: {url}")
+    return url
 
 
 def get_month_end(month_start: datetime.date) -> datetime.date:

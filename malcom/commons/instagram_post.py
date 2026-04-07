@@ -27,8 +27,9 @@ import time
 
 import requests
 
+from commons.functions import upload_to_catbox
+
 INSTAGRAM_API_BASE = "https://graph.instagram.com/v22.0"
-CATBOX_API_URL = "https://catbox.moe/user/api.php"
 
 # Container status polling
 CONTAINER_POLL_INTERVAL_SECONDS = 3
@@ -39,41 +40,8 @@ CONTAINER_STATUS_IN_PROGRESS = "IN_PROGRESS"
 logger = logging.getLogger(__name__)
 
 
-class CatboxUploadError(RuntimeError):
-    """Raised when a catbox.moe upload fails."""
-
-
 class InstagramContainerError(RuntimeError):
     """Raised when an Instagram media container fails to reach FINISHED status."""
-
-
-def upload_to_catbox(image_bytes: bytes, filename: str = "image.jpg") -> str:
-    """Upload bytes to catbox.moe anonymously and return the public HTTPS URL.
-
-    catbox.moe accepts a multipart POST with `reqtype=fileupload` and returns the
-    URL as plain text in the response body. No API key or signup required.
-    """
-    try:
-        response = requests.post(
-            CATBOX_API_URL,
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": (filename, image_bytes, "image/jpeg")},
-            timeout=60,
-        )
-    except requests.RequestException as exc:
-        raise CatboxUploadError(f"catbox upload failed for {filename!r}: {exc}") from exc
-
-    if response.status_code != 200:  # noqa: PLR2004
-        raise CatboxUploadError(
-            f"catbox upload failed for {filename!r}: HTTP {response.status_code} — {response.text[:200]}"
-        )
-
-    url = response.text.strip()
-    if not url.startswith("https://"):
-        raise CatboxUploadError(f"catbox returned unexpected response for {filename!r}: {url[:200]!r}")
-
-    logger.debug(f"Uploaded {filename!r} to catbox: {url}")
-    return url
 
 
 def create_carousel_item(user_id: str, access_token: str, image_url: str) -> str:
