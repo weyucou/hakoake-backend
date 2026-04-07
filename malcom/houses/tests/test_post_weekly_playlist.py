@@ -87,7 +87,7 @@ class TestPostWeeklyPlaylistCommand(TestCase):
         out = StringIO()
         with self.assertLogs("houses.management.commands.post_weekly_playlist", level="WARNING") as cm:
             call_command("post_weekly_playlist", "--dry-run", stdout=out)
-        self.assertTrue(any("truncating" in msg for msg in cm.output))
+        self.assertTrue(any("only first" in msg and "flyer/QR slides" in msg for msg in cm.output))
 
     def test_uses_latest_playlist_when_no_id_given(self) -> None:
         newer_playlist = WeeklyPlaylist.objects.create(

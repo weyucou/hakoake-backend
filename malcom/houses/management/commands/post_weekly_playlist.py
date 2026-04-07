@@ -107,22 +107,25 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR("No WeeklyPlaylist found"))
                 return
 
-        entries = list(
+        all_entries = list(
             WeeklyPlaylistEntry.objects.filter(playlist=playlist).order_by("position").select_related("song__performer")
         )
-        if not entries:
+        if not all_entries:
             self.stderr.write(self.style.ERROR("Playlist has no entries"))
             return
 
+        # The cover slide lists every performer (limited only by what fits visually);
+        # the per-performer flyer + QR pairs are truncated to stay under the IG carousel cap.
         max_performers = (MAX_CAROUSEL_SLIDES - 1) // 2
-        if len(entries) > max_performers:
+        entries = all_entries[:max_performers]
+        if len(all_entries) > max_performers:
             logger.warning(
-                "Playlist has %d entries; truncating to %d to stay within %d-slide carousel limit",
-                len(entries),
+                "Playlist has %d entries; only first %d get flyer/QR slides (cover lists all) "
+                "to stay within %d-slide carousel limit",
+                len(all_entries),
                 max_performers,
                 MAX_CAROUSEL_SLIDES,
             )
-            entries = entries[:max_performers]
 
         week_start = playlist.date
         week_end = week_start + timedelta(days=7)
@@ -147,8 +150,8 @@ class Command(BaseCommand):
             self.stdout.write(caption)
             self.stdout.write(f"\nCaption length: {len(caption)} chars")
 
-        # --- Cover slide ---
-        cover_entries = [(e.position, e.song.performer.name) for e in entries]
+        # --- Cover slide (lists every entry, not just the truncated set) ---
+        cover_entries = [(e.position, e.song.performer.name) for e in all_entries]
         title = f"HAKKO-AKKEI WEEK {week_start.strftime('%Y-%m-%d')} TOKYO Playlist"
         cover_bytes = generate_playlist_cover(title, week_label, cover_entries)
         self.stdout.write(f"Generated cover image ({len(cover_bytes):,} bytes)")

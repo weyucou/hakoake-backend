@@ -37,9 +37,18 @@ SECONDARY_COLOR = (200, 200, 200)
 DIM_COLOR = (150, 150, 150)
 DIVIDER_COLOR = (60, 60, 80)
 
-# --- Font paths ---
-_FONT_BOLD = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
-_FONT_REGULAR = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+# --- Font fallback chain ---
+# Each entry is (path, ttc_index). Noto Sans CJK is a TrueType Collection;
+# index=0 selects the JP face (Latin + full CJK coverage). DejaVu is the
+# Latin-only last resort before PIL's bitmap default.
+_FONT_FALLBACKS_BOLD: tuple[tuple[Path, int | None], ...] = (
+    (Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"), 0),
+    (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"), None),
+)
+_FONT_FALLBACKS_REGULAR: tuple[tuple[Path, int | None], ...] = (
+    (Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"), 0),
+    (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), None),
+)
 
 # --- Fallback background image (used when no performer/flyer image is available) ---
 _FALLBACK_BG = Path(__file__).resolve().parent.parent.parent / "insta-background.png"
@@ -63,12 +72,23 @@ INSTAGRAM_HASHTAGS = (
 )
 
 
-def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
-    path = _FONT_BOLD if bold else _FONT_REGULAR
-    try:
-        return ImageFont.truetype(str(path), size)
-    except OSError:
-        return ImageFont.load_default()
+def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Resolve a font for the given size, walking the CJK→Latin fallback chain.
+
+    The first entry (Noto Sans CJK) covers Latin + full Japanese; subsequent
+    entries are Latin-only fallbacks if Noto CJK is missing. PIL's bitmap
+    default is the final fallback so this function never raises.
+    """
+    fallbacks = _FONT_FALLBACKS_BOLD if bold else _FONT_FALLBACKS_REGULAR
+    for path, index in fallbacks:
+        try:
+            if index is not None:
+                return ImageFont.truetype(str(path), size, index=index)
+            return ImageFont.truetype(str(path), size)
+        except (OSError, ValueError):
+            continue
+    logger.warning("No usable TrueType font found in fallback chain; using PIL default")
+    return ImageFont.load_default()
 
 
 def _text_wrapped(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
@@ -163,7 +183,7 @@ def generate_playlist_cover(
         week_label: Human-readable period (e.g. "Week of 2026-03-30")
         entries: List of (position, performer_name) tuples in playlist order
     """
-    img = Image.new("RGB", (IMG_W, IMG_H), BG_COLOR)
+    img = _fill_background(Image.new("RGB", (IMG_W, IMG_H), BG_COLOR), None)
     draw = ImageDraw.Draw(img)
 
     # --- Top accent bar ---
@@ -267,9 +287,9 @@ def generate_performer_card(
     for sched in schedules[:4]:
         date_str = sched.performance_date.strftime("%Y-%m-%d (%a)")
         venue = sched.live_house.name
-        draw.text((IMG_W // 2, sched_y), f"📅 {date_str}", font=font_venue, fill=ACCENT_COLOR, anchor="mt")
+        draw.text((IMG_W // 2, sched_y), date_str, font=font_venue, fill=ACCENT_COLOR, anchor="mt")
         sched_y += 38
-        draw.text((IMG_W // 2, sched_y), f"📍 {venue}", font=font_info, fill=SECONDARY_COLOR, anchor="mt")
+        draw.text((IMG_W // 2, sched_y), venue, font=font_info, fill=SECONDARY_COLOR, anchor="mt")
         sched_y += 36
         if sched.open_time or sched.start_time:
             time_parts = []
@@ -390,7 +410,7 @@ def generate_qr_slide(
 
     # Venue
     font_detail = _font(34)
-    draw.text((IMG_W // 2, text_y), f"📍 {venue_name}", font=font_detail, fill=SECONDARY_COLOR, anchor="mt")
+    draw.text((IMG_W // 2, text_y), venue_name, font=font_detail, fill=SECONDARY_COLOR, anchor="mt")
     text_y += 50
 
     # Event name (if set)
@@ -405,7 +425,7 @@ def generate_qr_slide(
     font_date = _font(34, bold=True)
     draw.text(
         (IMG_W // 2, text_y),
-        f"📅 {event_date.strftime('%Y-%m-%d (%a)')}",
+        event_date.strftime("%Y-%m-%d (%a)"),
         font=font_date,
         fill=ACCENT_COLOR,
         anchor="mt",
