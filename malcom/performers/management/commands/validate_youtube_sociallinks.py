@@ -1,10 +1,9 @@
 import datetime
 import logging
-import re
 import time
 from pathlib import Path
 
-from commons.youtube_utils import get_authorized_youtube_client
+from commons.youtube_utils import get_authorized_youtube_client, parse_iso8601_duration
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
 
@@ -16,17 +15,6 @@ logger = logging.getLogger(__name__)
 YOUTUBE_READONLY_SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 BATCH_SIZE = 50
 VIDEO_COUNT_THRESHOLD = 10
-
-
-def parse_iso8601_duration(duration: str) -> int:
-    """Parse ISO 8601 duration (PT1H2M3S) to seconds."""
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration)
-    if not match:
-        return 0
-    hours = int(match.group(1) or 0)
-    minutes = int(match.group(2) or 0)
-    seconds = int(match.group(3) or 0)
-    return hours * 3600 + minutes * 60 + seconds
 
 
 def name_matches(performer_name: str, channel_title: str, channel_description: str) -> bool:

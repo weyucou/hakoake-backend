@@ -17,11 +17,11 @@ This command:
 """
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from commons.functions import parse_week
-from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist
+from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist, get_video_durations
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_TOP_PERFORMERS_COUNT = 5
+
+# PerformerSong rows last touched before this date were ingested by an earlier
+# extraction path that occasionally stored stale ``youtube_duration_seconds``
+# values (see hakoake-backend playlist incident on 2026-04-06 where a 41-minute
+# live recording was stored as a short clip). For any candidate song whose
+# ``updated_datetime`` is before this cutoff we re-verify the actual duration
+# against the YouTube API before applying the playlist duration filter, then
+# bump ``updated_datetime`` so subsequent runs skip the row.
+DURATION_REVERIFICATION_CUTOFF_DATE = date(2026, 3, 30)
 
 
 class Command(BaseCommand):
@@ -64,6 +73,83 @@ class Command(BaseCommand):
             "--dry-run",
             action="store_true",
             help="Perform a dry run without creating playlist or updating weights",
+        )
+
+    def _reverify_legacy_song_durations(
+        self,
+        eligible_performers: list[Performer],
+        min_duration_seconds: int,
+        max_duration_seconds: int,
+        secrets_file: Path,
+    ) -> None:
+        """Re-verify YouTube durations for legacy candidate songs.
+
+        The candidate filter relies on ``auto_now`` having stamped
+        ``updated_datetime`` at last save: anything before
+        ``DURATION_REVERIFICATION_CUTOFF_DATE`` is treated as legacy. Every
+        processed row's ``updated_datetime`` is bumped (even when the duration
+        matched) so subsequent runs converge — once the legacy backlog drains,
+        this method becomes a no-op. Videos missing from the API response are
+        set to ``youtube_duration_seconds=0`` to exclude them downstream.
+        """
+        candidate_rows = list(
+            PerformerSong.objects.filter(
+                performer__in=eligible_performers,
+                updated_datetime__date__lt=DURATION_REVERIFICATION_CUTOFF_DATE,
+                youtube_video_id__isnull=False,
+                youtube_duration_seconds__gte=min_duration_seconds,
+                youtube_duration_seconds__lte=max_duration_seconds,
+            )
+            .exclude(youtube_video_id="")
+            .values_list("id", "youtube_video_id", "youtube_duration_seconds")
+        )
+
+        if not candidate_rows:
+            return
+
+        self.stdout.write(
+            f"Re-verifying YouTube durations for {len(candidate_rows)} legacy candidate song(s) "
+            f"(updated_datetime before {DURATION_REVERIFICATION_CUTOFF_DATE.isoformat()})..."
+        )
+
+        video_ids = [video_id for _, video_id, _ in candidate_rows]
+        actual_durations = get_video_durations(video_ids, secrets_file)
+
+        updates = 0
+        unavailable_ids: list[int] = []
+        unchanged_ids: list[int] = []
+        now = timezone.now()
+        for song_id, video_id, db_duration in candidate_rows:
+            actual = actual_durations.get(video_id)
+            if actual is None:
+                unavailable_ids.append(song_id)
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"  song id={song_id} video={video_id} unavailable on YouTube; duration set to 0"
+                    )
+                )
+                continue
+            if actual != db_duration:
+                PerformerSong.objects.filter(pk=song_id).update(
+                    youtube_duration_seconds=actual,
+                    updated_datetime=now,
+                )
+                updates += 1
+                self.stdout.write(f"  song id={song_id} video={video_id} duration {db_duration}s -> {actual}s")
+            else:
+                unchanged_ids.append(song_id)
+
+        if unavailable_ids:
+            PerformerSong.objects.filter(pk__in=unavailable_ids).update(
+                youtube_duration_seconds=0,
+                updated_datetime=now,
+            )
+        if unchanged_ids:
+            PerformerSong.objects.filter(pk__in=unchanged_ids).update(updated_datetime=now)
+
+        self.stdout.write(
+            f"Re-verification complete: {updates} duration update(s), "
+            f"{len(unavailable_ids)} unavailable video(s), {len(unchanged_ids)} verified-unchanged"
         )
 
     def handle(self, *args, **options):  # noqa: ANN002, ANN003, C901, PLR0911, PLR0912, PLR0915
@@ -149,14 +235,24 @@ class Command(BaseCommand):
             )
             return
 
+        min_duration_seconds = settings.MIN_SONG_SELECTION_DURATION_SECONDS
+        max_duration_seconds = settings.MAX_SONG_SELECTION_DURATION_MINUTES * 60
+
+        # Re-verify legacy song durations before filtering. Out-of-range songs
+        # cannot be selected anyway, so we skip them to save API quota.
+        if not dry_run:
+            self._reverify_legacy_song_durations(
+                eligible_performers,
+                min_duration_seconds,
+                max_duration_seconds,
+                secrets_file,
+            )
+
         # Select performers with unique songs (deduplicate by video_id)
         # NOTE: Weekly playlists do NOT exclude songs from previous playlists
         # They rely purely on playlist_weight rotation for fair selection
         selected_songs = []
         used_video_ids = set()
-
-        min_duration_seconds = settings.MIN_SONG_SELECTION_DURATION_SECONDS
-        max_duration_seconds = settings.MAX_SONG_SELECTION_DURATION_MINUTES * 60
 
         for performer in eligible_performers:
             if len(selected_songs) >= top_n:

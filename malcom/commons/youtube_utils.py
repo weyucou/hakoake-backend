@@ -2,6 +2,7 @@
 
 import logging
 import pickle
+import re
 from pathlib import Path
 
 import google_auth_oauthlib.flow
@@ -13,6 +14,23 @@ from google.auth.transport.requests import Request
 logger = logging.getLogger(__name__)
 
 DEFAULT_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
+VIDEOS_LIST_BATCH_SIZE = 50  # YouTube Data API videos.list max ids per call
+
+_ISO8601_DURATION_RE = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
+
+
+def parse_iso8601_duration(duration: str) -> int:
+    """Parse a YouTube ISO 8601 duration (e.g. ``PT1H2M3S``) to total seconds.
+
+    Returns 0 if the string cannot be parsed.
+    """
+    match = _ISO8601_DURATION_RE.fullmatch(duration or "")
+    if not match:
+        return 0
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
 
 
 def get_authorized_youtube_client(client_secrets_file: Path, scopes: list[str] | None = None):
@@ -128,6 +146,36 @@ def list_playlist_items(playlist_id: str, client_secrets_file: Path) -> list[dic
             break
     logger.info(f"Listed {len(items)} items in playlist {playlist_id}")
     return items
+
+
+def get_video_durations(video_ids: list[str], client_secrets_file: Path) -> dict[str, int]:
+    """Fetch actual durations (in seconds) for the given YouTube video IDs.
+
+    Returns a dict mapping ``video_id`` -> ``duration_seconds``. Videos that
+    are deleted, private, or otherwise unavailable will be omitted from the
+    result. Empty input returns an empty dict.
+
+    Batches IDs into groups of ``VIDEOS_LIST_BATCH_SIZE`` (the YouTube API
+    ``videos.list`` per-call maximum).
+    """
+    if not video_ids:
+        return {}
+
+    youtube = get_authorized_youtube_client(client_secrets_file)
+    durations: dict[str, int] = {}
+    for start in range(0, len(video_ids), VIDEOS_LIST_BATCH_SIZE):
+        batch = video_ids[start : start + VIDEOS_LIST_BATCH_SIZE]
+        try:
+            response = youtube.videos().list(part="contentDetails", id=",".join(batch)).execute()
+        except googleapiclient.errors.HttpError:
+            logger.exception(f"Failed to fetch durations for batch starting at index {start}")
+            continue
+        for item in response.get("items", []):
+            video_id = item["id"]
+            iso_duration = item.get("contentDetails", {}).get("duration", "")
+            durations[video_id] = parse_iso8601_duration(iso_duration)
+    logger.info(f"Fetched durations for {len(durations)}/{len(video_ids)} videos")
+    return durations
 
 
 def remove_playlist_item(playlist_item_id: str, client_secrets_file: Path) -> bool:
