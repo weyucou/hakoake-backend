@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "audioop-lts>=0.2.2",
     "beautifulsoup4>=4.13.4",
+    "cairosvg>=2.9.0",
     "django>=5.2,<5.3",
     "django-distill>=3.2.7",
     "edge-tts>=7.2.3",

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from django.test import TestCase
 from performers.models import Performer
@@ -7,6 +7,13 @@ from performers.models import Performer
 from ..crawlers import CrawlerRegistry, LaMamaCrawler, LoftProjectShelterCrawler
 from ..definitions import WebsiteProcessingState
 from ..models import LiveHouse, LiveHouseWebsite, PerformanceSchedule
+
+_MINIMAL_SVG = b"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+  <rect width="100" height="100" fill="red"/>
+</svg>"""
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 class TestLiveHouseWebsiteCrawler(TestCase):
@@ -459,3 +466,56 @@ class TestCleanPerformerName(TestCase):
 
     def test_preserves_normal_name(self):
         self.assertEqual(self.crawler._clean_performer_name("Band Anymore"), "Band Anymore")
+
+
+class TestSaveEventImageSvgConversion(TestCase):
+    """Regression tests for SVG-to-PNG conversion in _save_event_image."""
+
+    def setUp(self):
+        self.website = LiveHouseWebsite.objects.create(
+            url="https://test.example.com",
+            state=WebsiteProcessingState.NOT_STARTED,
+            crawler_class="LoftProjectShelterCrawler",
+        )
+        self.crawler = LoftProjectShelterCrawler(self.website)
+
+    def _make_mock_performance(self):  # noqa: ANN202
+        event_image = MagicMock()
+        event_image.__bool__.return_value = False
+        performance = Mock()
+        performance.event_image = event_image
+        return performance
+
+    @patch("requests.Session.get")
+    def test_svg_by_content_type_converted_to_png(self, mock_get):  # noqa: ANN001
+        """SVG detected via image/svg+xml Content-Type is converted to PNG before saving."""
+        mock_response = Mock()
+        mock_response.content = _MINIMAL_SVG
+        mock_response.headers = {"Content-Type": "image/svg+xml"}
+        mock_response.raise_for_status = Mock()
+        mock_get.return_value = mock_response
+
+        performance = self._make_mock_performance()
+        self.crawler._save_event_image("https://example.com/flyer.svg", performance)
+
+        performance.event_image.save.assert_called_once()
+        saved_filename, saved_content = performance.event_image.save.call_args[0]
+        self.assertTrue(saved_filename.endswith(".png"), f"Expected .png filename, got: {saved_filename}")
+        self.assertEqual(saved_content.read()[:8], _PNG_MAGIC)
+
+    @patch("requests.Session.get")
+    def test_svg_by_extension_converted_to_png(self, mock_get):  # noqa: ANN001
+        """SVG detected via .svg file extension is converted to PNG before saving."""
+        mock_response = Mock()
+        mock_response.content = _MINIMAL_SVG
+        mock_response.headers = {"Content-Type": "application/octet-stream"}
+        mock_response.raise_for_status = Mock()
+        mock_get.return_value = mock_response
+
+        performance = self._make_mock_performance()
+        self.crawler._save_event_image("https://example.com/menu_twitter.svg", performance)
+
+        performance.event_image.save.assert_called_once()
+        saved_filename, saved_content = performance.event_image.save.call_args[0]
+        self.assertTrue(saved_filename.endswith(".png"), f"Expected .png filename, got: {saved_filename}")
+        self.assertEqual(saved_content.read()[:8], _PNG_MAGIC)

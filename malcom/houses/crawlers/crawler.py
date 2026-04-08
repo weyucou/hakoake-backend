@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from urllib.parse import urljoin
 
+import cairosvg
 import requests
 from bs4 import BeautifulSoup
 from django.core.exceptions import ValidationError
@@ -532,14 +533,23 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
             self._save_event_image(event_image_url, performance)
 
     def _save_event_image(self, url: str, performance: PerformanceSchedule) -> None:
-        """Download image from URL and save it to the performance's event_image field."""
+        """Download image from URL and save it to the performance's event_image field.
+
+        SVG images are converted to PNG via cairosvg before saving.
+        """
         if performance.event_image:
             return  # Already has an image
         try:
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
+            content = response.content
             filename = url.split("/")[-1].split("?")[0] or f"event_{performance.pk}.jpg"
-            performance.event_image.save(filename, ContentFile(response.content), save=True)
+            content_type = response.headers.get("Content-Type", "")
+            if "svg" in content_type.lower() or filename.lower().endswith(".svg"):
+                content = cairosvg.svg2png(bytestring=content)
+                filename = filename.rsplit(".", 1)[0] + ".png"
+                logger.info(f"Converted SVG to PNG for {performance} from {url}")
+            performance.event_image.save(filename, ContentFile(content), save=True)
             logger.info(f"Saved event image for {performance} from {url}")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Failed to download event image from {url}: {exc}")
