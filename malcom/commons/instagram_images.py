@@ -1,22 +1,50 @@
-"""Styled image generation for Instagram playlist posts.
+"""Styled Instagram carousel slide generators (1080×1080 JPEG output).
 
-Generates two types of images:
-- Playlist cover: numbered artist list with hakoake branding
-- Performer card: performer photo/art + event details overlay
-- QR code slide: QR code + metadata overlay for Instagram carousel
+Four slide types are exported, all rendered against the warm analog
+Tokyo live-house aesthetic defined in commons/design.py:
+
+- generate_playlist_cover  — numbered lineup cover slide
+- generate_performer_card  — full-bleed performer photo + editorial caption
+- generate_qr_slide        — QR-only slide with metadata
+- generate_combined_flyer_qr_slide — flyer-as-background + QR overlay panel
+
+The design system (palette, fonts, helpers) lives in `commons.design` and
+is shared with the playlist video generator in `houses/functions.py` so the
+two pipelines never drift again.
 """
 
 from __future__ import annotations
 
-import functools
 import io
 import logging
 from datetime import date  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import qrcode
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
+
+from commons.design import (
+    AGED_CREAM,
+    AGED_CREAM_PANEL,
+    FLYER_RED,
+    INK_GRAY,
+    INSTAGRAM_SQUARE,
+    PAPER_BLACK,
+    PAPER_BLACK_WASH,
+    SP_LG,
+    SP_MD,
+    SP_SM,
+    SP_XS,
+    apply_paper_grain,
+    body_font,
+    build_qr_code,
+    display_font,
+    draw_corner_wordmark,
+    draw_torn_edge,
+    load_brand_background,
+    scale_to_fill,
+    wrap_text,
+)
 
 if TYPE_CHECKING:
     from houses.models import PerformanceSchedule
@@ -25,33 +53,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # --- Canvas ---
-IMG_W = 1080
-IMG_H = 1080
-
-# --- Colour palette (matches intro video style) ---
-BG_COLOR = (20, 20, 30)
-OVERLAY_COLOR = (20, 20, 30, 200)  # semi-transparent dark overlay for text legibility
-TEXT_COLOR = (255, 255, 255)
-ACCENT_COLOR = (255, 100, 100)  # coral — titles / highlights
-SECONDARY_COLOR = (200, 200, 200)
-DIM_COLOR = (150, 150, 150)
-DIVIDER_COLOR = (60, 60, 80)
-
-# --- Font fallback chain ---
-# Each entry is (path, ttc_index). Noto Sans CJK is a TrueType Collection;
-# index=0 selects the JP face (Latin + full CJK coverage). DejaVu is the
-# Latin-only last resort before PIL's bitmap default.
-_FONT_FALLBACKS_BOLD: tuple[tuple[Path, int | None], ...] = (
-    (Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"), 0),
-    (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"), None),
-)
-_FONT_FALLBACKS_REGULAR: tuple[tuple[Path, int | None], ...] = (
-    (Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"), 0),
-    (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), None),
-)
-
-# --- Fallback background image (used when no performer/flyer image is available) ---
-_FALLBACK_BG = Path(__file__).resolve().parent.parent.parent / "insta-background.png"
+# Kept as module-level constants for back-compat with tests and external callers.
+IMG_W, IMG_H = INSTAGRAM_SQUARE
 
 INSTAGRAM_HASHTAGS = (
     "hakoake",
@@ -73,41 +76,13 @@ INSTAGRAM_HASHTAGS = (
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Resolve a font for the given size, walking the CJK→Latin fallback chain.
+    """Back-compat shim for the body font loader.
 
-    The first entry (Noto Sans CJK) covers Latin + full Japanese; subsequent
-    entries are Latin-only fallbacks if Noto CJK is missing. PIL's bitmap
-    default is the final fallback so this function never raises.
+    Existing tests and a couple of legacy call sites import `_font` directly.
+    Delegates to `commons.design.body_font` so the CJK fallback chain is
+    shared with the video generator.
     """
-    fallbacks = _FONT_FALLBACKS_BOLD if bold else _FONT_FALLBACKS_REGULAR
-    for path, index in fallbacks:
-        try:
-            if index is not None:
-                return ImageFont.truetype(str(path), size, index=index)
-            return ImageFont.truetype(str(path), size)
-        except (OSError, ValueError):
-            continue
-    logger.warning("No usable TrueType font found in fallback chain; using PIL default")
-    return ImageFont.load_default()
-
-
-def _text_wrapped(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
-    """Split text into lines that fit within max_width pixels."""
-    words = text.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        test = f"{current} {word}".strip()
-        bbox = draw.textbbox((0, 0), test, font=font)
-        if bbox[2] - bbox[0] <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines or [text]
+    return body_font(size, bold=bold)
 
 
 def _to_jpeg(img: Image.Image) -> bytes:
@@ -117,7 +92,7 @@ def _to_jpeg(img: Image.Image) -> bytes:
 
 
 def _load_performer_image(performer: Performer) -> Image.Image | None:
-    """Load the best available performer image (performer_image → fanart → banner)."""
+    """Load the best available performer image (performer_image → fanart → banner → logo)."""
     for field in ("performer_image", "fanart_image", "banner_image", "logo_image"):
         field_val = getattr(performer, field, None)
         if field_val and field_val.name:
@@ -130,112 +105,114 @@ def _load_performer_image(performer: Performer) -> Image.Image | None:
     return None
 
 
-def _scale_to_fill(img: Image.Image) -> Image.Image:
-    """Scale-crop image to fill IMG_W × IMG_H."""
-    ratio = max(IMG_W / img.width, IMG_H / img.height)
-    new_w = int(img.width * ratio)
-    new_h = int(img.height * ratio)
-    resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    x = (new_w - IMG_W) // 2
-    y = (new_h - IMG_H) // 2
-    return resized.crop((x, y, x + IMG_W, y + IMG_H))
+def _paper_black_canvas() -> Image.Image:
+    """Return a fresh PAPER_BLACK canvas with paper grain applied."""
+    base = Image.new("RGB", INSTAGRAM_SQUARE, PAPER_BLACK)
+    return apply_paper_grain(base)
 
 
-@functools.lru_cache(maxsize=1)
-def _load_fallback_bg() -> Image.Image | None:
-    """Load, scale, and apply 60% opacity to the fallback background. Cached after first call."""
-    try:
-        bg = Image.open(_FALLBACK_BG).convert("RGBA")
-        bg = _scale_to_fill(bg)
-        r, g, b, a = bg.split()
-        bg.putalpha(a.point(lambda v: int(v * 0.6)))
-    except OSError as exc:
-        logger.debug(f"Could not load fallback background {_FALLBACK_BG}: {exc}")
-        return None
-    else:
-        return bg
+def _resize_to_square(raw_bytes: bytes, size: int = 1080) -> bytes:
+    """Center-crop raw image bytes to a square JPEG of the given size."""
+    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    cropped = scale_to_fill(img, (size, size))
+    return _to_jpeg(cropped)
 
 
-def _fill_background(_img: Image.Image, source: Image.Image | None) -> Image.Image:
-    """Fill canvas with source image (blurred, darkened) or fallback background at 60% opacity."""
-    if source:
-        blurred = _scale_to_fill(source).filter(ImageFilter.GaussianBlur(radius=8))
-        overlay = Image.new("RGBA", (IMG_W, IMG_H), OVERLAY_COLOR)
-        base = blurred.convert("RGBA")
-        base.alpha_composite(overlay)
-        return base.convert("RGB")
-    base = Image.new("RGBA", (IMG_W, IMG_H), (*BG_COLOR, 255))
-    bg = _load_fallback_bg()
-    if bg is not None:
-        base.alpha_composite(bg)
-    return base.convert("RGB")
+def generate_qr_code(url: str, size: int = 300) -> Image.Image:
+    """Back-compat shim — delegates to commons.design.build_qr_code."""
+    return build_qr_code(url, size)
+
+
+# --- Slide 1: playlist cover ----------------------------------------------------
 
 
 def generate_playlist_cover(
     _title: str,
     week_label: str,
-    entries: list[tuple[int, str]],  # [(position, performer_name), ...]
+    entries: list[tuple[int, str]],
 ) -> bytes:
-    """Generate a numbered artist list cover image. Returns JPEG bytes.
+    """Numbered lineup cover slide.
+
+    Layout:
+      - Full-bleed brand background photo, darkened with a paper-black wash
+      - Top-left editorial display label (week / month) in cream
+      - Big oversized vermillion numerals down the left rail with cream names
+      - Corner wordmark bottom-left
 
     Args:
-        _title: Playlist title (reserved for future use)
-        week_label: Human-readable period (e.g. "Week of 2026-03-30")
-        entries: List of (position, performer_name) tuples in playlist order
+        _title: Reserved for future use; the cover does not display a title.
+        week_label: Period label, e.g. "Week of 2026-03-30" or "April 2026".
+        entries: Ordered (position, performer_name) tuples in playlist order.
     """
-    img = _fill_background(Image.new("RGB", (IMG_W, IMG_H), BG_COLOR), None)
-    draw = ImageDraw.Draw(img)
+    base = load_brand_background(INSTAGRAM_SQUARE)
+    if base is None:
+        canvas = _paper_black_canvas()
+    else:
+        canvas = base.copy().convert("RGBA")
+        wash = Image.new("RGBA", INSTAGRAM_SQUARE, PAPER_BLACK_WASH)
+        canvas.alpha_composite(wash)
+        canvas = apply_paper_grain(canvas.convert("RGB"))
 
-    # --- Top accent bar ---
-    draw.rectangle([(0, 0), (IMG_W, 8)], fill=ACCENT_COLOR)
+    draw = ImageDraw.Draw(canvas)
 
-    # --- Branding ---
-    font_brand = _font(52, bold=True)
-    draw.text((IMG_W // 2, 60), "HAKKO-AKKEI", font=font_brand, fill=ACCENT_COLOR, anchor="mt")
+    # --- Editorial header (display font, mincho serif) ---
+    label_font = body_font(22, bold=True)
+    draw.text(
+        (SP_LG, SP_LG),
+        "TOKYO LIVE HOUSES // LINEUP",
+        font=label_font,
+        fill=INK_GRAY,
+    )
 
-    # --- Week label ---
-    font_week = _font(32)
-    draw.text((IMG_W // 2, 130), week_label, font=font_week, fill=SECONDARY_COLOR, anchor="mt")
+    period_font = display_font(72)
+    draw.text((SP_LG, SP_LG + 36), week_label, font=period_font, fill=AGED_CREAM)
 
-    # --- Divider ---
-    draw.rectangle([(80, 170), (IMG_W - 80, 173)], fill=DIVIDER_COLOR)
+    # --- Numbered lineup ---
+    max_visible = 8
+    visible = entries[:max_visible]
+    list_top = 280
+    list_bottom = IMG_H - 140
+    available_h = list_bottom - list_top
+    line_h = available_h // max(len(visible), 1)
+    line_h = max(72, min(line_h, 110))
 
-    # --- "THIS WEEK'S LINEUP" subheader ---
-    font_sub = _font(28)
-    draw.text((IMG_W // 2, 195), "THIS WEEK'S LINEUP", font=font_sub, fill=DIM_COLOR, anchor="mt")
+    num_font = display_font(int(line_h * 0.9))
+    name_font = display_font(int(line_h * 0.55))
+    name_x = SP_LG + 180
 
-    # --- Performer list ---
-    font_num = _font(34, bold=True)
-    font_name = _font(38, bold=True)
-    y = 250
-    line_h = 72
-    max_visible = 10
-
-    for pos, name in entries[:max_visible]:
-        # Position number circle
-        draw.ellipse([(80, y), (80 + 44, y + 44)], fill=ACCENT_COLOR)
-        draw.text((102, y + 22), str(pos), font=font_num, fill=TEXT_COLOR, anchor="mm")
-        # Performer name
-        draw.text((145, y + 22), name, font=font_name, fill=TEXT_COLOR, anchor="lm")
-        y += line_h
+    for i, (pos, name) in enumerate(visible):
+        y = list_top + i * line_h
+        # Oversized vermillion numeral
+        draw.text(
+            (SP_LG + 4, y + line_h // 2),
+            f"{pos:02d}",
+            font=num_font,
+            fill=FLYER_RED,
+            anchor="lm",
+        )
+        # Performer name in cream — wrap if too long
+        max_name_w = IMG_W - name_x - SP_LG
+        lines = wrap_text(draw, name, name_font, max_name_w)
+        if lines:
+            draw.text((name_x, y + line_h // 2), lines[0], font=name_font, fill=AGED_CREAM, anchor="lm")
 
     if len(entries) > max_visible:
+        more_font = body_font(24, bold=True)
         draw.text(
-            (IMG_W // 2, y + 10),
+            (SP_LG, list_bottom + 8),
             f"+ {len(entries) - max_visible} more",
-            font=font_sub,
-            fill=DIM_COLOR,
-            anchor="mt",
+            font=more_font,
+            fill=INK_GRAY,
+            anchor="lt",
         )
 
-    # --- Bottom accent bar ---
-    draw.rectangle([(0, IMG_H - 8), (IMG_W, IMG_H)], fill=ACCENT_COLOR)
+    # --- Corner wordmark ---
+    draw_corner_wordmark(draw, (SP_LG, IMG_H - SP_LG), anchor="lb", color=INK_GRAY, size=18)
 
-    # --- YouTube label at bottom ---
-    font_yt = _font(26)
-    draw.text((IMG_W // 2, IMG_H - 40), "▶ YouTube Playlist", font=font_yt, fill=SECONDARY_COLOR, anchor="mm")
+    return _to_jpeg(canvas)
 
-    return _to_jpeg(img)
+
+# --- Slide 2: performer card ----------------------------------------------------
 
 
 def generate_performer_card(
@@ -243,113 +220,97 @@ def generate_performer_card(
     position: int,
     schedules: list[PerformanceSchedule],
 ) -> bytes:
-    """Generate a styled performer card with photo and event details. Returns JPEG bytes."""
+    """Performer card with full-saturation photo and editorial caption.
+
+    Layout:
+      - Top 62% of the canvas: performer photo (or brand bg fallback) at full
+        saturation — no blur, no overlay. Photos are the point.
+      - Torn-paper edge separates photo from a PAPER_BLACK caption panel.
+      - Bottom 38%: display-font name + romaji + venue/date metadata
+      - Oversized vermillion position numeral in the top-left corner of the panel
+    """
     source_img = _load_performer_image(performer)
-    img = _fill_background(Image.new("RGB", (IMG_W, IMG_H), BG_COLOR), source_img)
-    draw = ImageDraw.Draw(img)
+    photo_h = int(IMG_H * 0.62)
 
-    # --- Top accent bar ---
-    draw.rectangle([(0, 0), (IMG_W, 8)], fill=ACCENT_COLOR)
-
-    # --- Position badge ---
-    draw.ellipse([(40, 30), (40 + 60, 30 + 60)], fill=ACCENT_COLOR)
-    draw.text((70, 60), str(position), font=_font(32, bold=True), fill=TEXT_COLOR, anchor="mm")
-
-    # --- Performer name (large, near top if no image, else near bottom) ---
-    name_y = 560 if source_img else 300
-    font_name = _font(68, bold=True)
-    # Shadow for legibility
-    draw.text((IMG_W // 2 + 2, name_y + 2), performer.name, font=font_name, fill=(0, 0, 0), anchor="mt")
-    draw.text((IMG_W // 2, name_y), performer.name, font=font_name, fill=TEXT_COLOR, anchor="mt")
-
-    # Romaji / kana subtitle if different from name
-    if performer.name_romaji and performer.name_romaji.lower() != performer.name.lower():
-        font_romaji = _font(32)
-        draw.text(
-            (IMG_W // 2, name_y + 82),
-            performer.name_romaji,
-            font=font_romaji,
-            fill=SECONDARY_COLOR,
-            anchor="mt",
-        )
-        sched_y = name_y + 130
+    # --- Photo region ---
+    photo_canvas = Image.new("RGB", INSTAGRAM_SQUARE, PAPER_BLACK)
+    if source_img is not None:
+        photo = scale_to_fill(source_img, (IMG_W, photo_h))
     else:
-        sched_y = name_y + 88
+        bg = load_brand_background((IMG_W, photo_h))
+        photo = bg if bg is not None else Image.new("RGB", (IMG_W, photo_h), PAPER_BLACK)
+    photo_canvas.paste(photo, (0, 0))
 
-    # --- Divider ---
-    draw.rectangle([(80, sched_y), (IMG_W - 80, sched_y + 2)], fill=ACCENT_COLOR)
-    sched_y += 16
+    # --- Paper black caption panel under the photo ---
+    panel = Image.new("RGB", (IMG_W, IMG_H - photo_h), PAPER_BLACK)
+    photo_canvas.paste(panel, (0, photo_h))
 
-    # --- Venue / schedule info ---
-    font_venue = _font(30, bold=True)
-    font_info = _font(26)
-    shown = 0
-    for sched in schedules[:4]:
-        date_str = sched.performance_date.strftime("%Y-%m-%d (%a)")
-        venue = sched.live_house.name
-        draw.text((IMG_W // 2, sched_y), date_str, font=font_venue, fill=ACCENT_COLOR, anchor="mt")
-        sched_y += 38
-        draw.text((IMG_W // 2, sched_y), venue, font=font_info, fill=SECONDARY_COLOR, anchor="mt")
-        sched_y += 36
-        if sched.open_time or sched.start_time:
-            time_parts = []
-            if sched.open_time:
-                time_parts.append(f"OPEN {sched.open_time.strftime('%H:%M')}")
-            if sched.start_time:
-                time_parts.append(f"START {sched.start_time.strftime('%H:%M')}")
-            draw.text(
-                (IMG_W // 2, sched_y),
-                "  ".join(time_parts),
-                font=font_info,
-                fill=DIM_COLOR,
-                anchor="mt",
-            )
-            sched_y += 34
-        sched_y += 8
-        shown += 1
+    # --- Torn edge between photo and panel ---
+    draw = ImageDraw.Draw(photo_canvas)
+    draw_torn_edge(draw, photo_h, IMG_W, PAPER_BLACK, amplitude=8, segments=70, seed=position * 7 + 3)
 
-    if not shown:
-        draw.text((IMG_W // 2, sched_y), "Tokyo Live Houses", font=font_info, fill=DIM_COLOR, anchor="mt")
+    # Apply paper grain over the whole composition
+    composed = apply_paper_grain(photo_canvas)
+    draw = ImageDraw.Draw(composed)
 
-    # --- Bottom accent bar ---
-    draw.rectangle([(0, IMG_H - 8), (IMG_W, IMG_H)], fill=ACCENT_COLOR)
-
-    # --- HAKKO-AKKEI branding bottom-right ---
+    # --- Oversized position numeral straddling the seam ---
+    numeral_font = display_font(220)
     draw.text(
-        (IMG_W - 40, IMG_H - 30),
-        "HAKKO-AKKEI",
-        font=_font(22),
-        fill=(100, 100, 120),
+        (SP_LG, photo_h + 6),
+        f"{position:02d}",
+        font=numeral_font,
+        fill=FLYER_RED,
+        anchor="lm",
+    )
+
+    # --- Performer name ---
+    name_x = SP_LG + 200
+    text_top = photo_h + SP_LG
+    name_font = display_font(64)
+    name_lines = wrap_text(draw, performer.name, name_font, IMG_W - name_x - SP_LG)
+    y = text_top
+    for line in name_lines[:2]:
+        draw.text((name_x, y), line, font=name_font, fill=AGED_CREAM, anchor="lt")
+        y += 70
+
+    # Romaji subtitle (only if it adds new info)
+    if performer.name_romaji and performer.name_romaji.lower() != performer.name.lower():
+        romaji_font = body_font(26)
+        draw.text((name_x, y), performer.name_romaji, font=romaji_font, fill=INK_GRAY, anchor="lt")
+        y += 36
+
+    # --- Venue / date metadata ---
+    y += SP_XS
+    detail_font = body_font(24, bold=True)
+    sub_font = body_font(22)
+    rendered = 0
+    for sched in schedules[:2]:
+        if y > IMG_H - SP_LG:
+            break
+        date_str = sched.performance_date.strftime("%a %b %d")
+        venue = sched.live_house.name
+        draw.text((name_x, y), date_str.upper(), font=detail_font, fill=FLYER_RED, anchor="lt")
+        y += 30
+        draw.text((name_x, y), venue, font=sub_font, fill=AGED_CREAM, anchor="lt")
+        y += 32
+        rendered += 1
+
+    if not rendered:
+        draw.text((name_x, y), "TOKYO LIVE HOUSES", font=detail_font, fill=INK_GRAY, anchor="lt")
+
+    # --- Corner wordmark bottom-right ---
+    draw_corner_wordmark(
+        draw,
+        (IMG_W - SP_LG, IMG_H - SP_LG),
         anchor="rb",
+        color=INK_GRAY,
+        size=16,
     )
 
-    return _to_jpeg(img)
+    return _to_jpeg(composed)
 
 
-def generate_qr_code(url: str, size: int = 300) -> Image.Image:
-    """Generate a QR code image for the given URL."""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=2,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    return qr_img.resize((size, size), Image.Resampling.LANCZOS)
-
-
-def _resize_to_square(raw_bytes: bytes, size: int = 1080) -> bytes:
-    """Center-crop raw image bytes to a square JPEG of the given size."""
-    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-    w, h = img.size
-    min_dim = min(w, h)
-    x = (w - min_dim) // 2
-    y = (h - min_dim) // 2
-    cropped = img.crop((x, y, x + min_dim, y + min_dim))
-    resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
-    return _to_jpeg(resized)
+# --- Slide 3: QR-only slide -----------------------------------------------------
 
 
 def generate_qr_slide(
@@ -360,90 +321,91 @@ def generate_qr_slide(
     event_name: str,
     event_date: date,
 ) -> bytes:
-    """Generate a 1080x1080 QR code slide with metadata overlay. Returns JPEG bytes.
+    """QR slide with editorial left rail + cream QR card on the right.
 
     Args:
-        url: QR code target URL
-        position: Performer position index in the playlist
-        performer_name: Performer name
-        venue_name: Live house name
-        event_name: PerformanceSchedule.performance_name
-        event_date: PerformanceSchedule.performance_date
+        url: QR target URL.
+        position: Performer position in the playlist.
+        performer_name: Performer name (display).
+        venue_name: Live house name.
+        event_name: PerformanceSchedule.performance_name (may be empty).
+        event_date: PerformanceSchedule.performance_date.
     """
-    img = Image.new("RGB", (IMG_W, IMG_H), BG_COLOR)
-    draw = ImageDraw.Draw(img)
+    canvas = _paper_black_canvas()
+    draw = ImageDraw.Draw(canvas)
 
-    # --- Top accent bar ---
-    draw.rectangle([(0, 0), (IMG_W, 8)], fill=ACCENT_COLOR)
+    # --- Left rail: editorial copy ---
+    rail_x = SP_LG
+    rail_w = int(IMG_W * 0.55)
 
-    # --- Branding ---
-    font_brand = _font(36, bold=True)
-    draw.text((IMG_W // 2, 40), "HAKKO-AKKEI", font=font_brand, fill=ACCENT_COLOR, anchor="mt")
+    # SCAN label
+    label_font = body_font(22, bold=True)
+    draw.text((rail_x, SP_LG), "SCAN // GET TICKETS", font=label_font, fill=INK_GRAY)
 
-    # --- QR code centered in upper portion ---
-    qr_size = 400
-    qr_img = generate_qr_code(url, qr_size)
-    qr_x = (IMG_W - qr_size) // 2
-    qr_y = 100
-    img.paste(qr_img, (qr_x, qr_y))
+    # Big position numeral
+    numeral_font = display_font(180)
+    draw.text((rail_x, SP_LG + 32), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
 
-    # --- Divider below QR ---
-    divider_y = qr_y + qr_size + 20
-    draw.rectangle([(80, divider_y), (IMG_W - 80, divider_y + 2)], fill=DIVIDER_COLOR)
+    # Performer name (display serif)
+    name_font = display_font(58)
+    name_y = SP_LG + 240
+    name_lines = wrap_text(draw, performer_name, name_font, rail_w)
+    for line in name_lines[:2]:
+        draw.text((rail_x, name_y), line, font=name_font, fill=AGED_CREAM, anchor="lt")
+        name_y += 64
 
-    # --- Metadata text ---
-    text_y = divider_y + 24
+    # Venue + date metadata
+    meta_font = body_font(24, bold=True)
+    draw.text((rail_x, name_y + SP_SM), venue_name, font=meta_font, fill=AGED_CREAM, anchor="lt")
+    name_y += SP_SM + 32
 
-    # Position badge + performer name on same line
-    badge_r = 26
-    badge_cx = 80 + badge_r
-    badge_cy = text_y + badge_r
-    draw.ellipse(
-        [(badge_cx - badge_r, badge_cy - badge_r), (badge_cx + badge_r, badge_cy + badge_r)],
-        fill=ACCENT_COLOR,
+    date_font = body_font(22, bold=True)
+    draw.text(
+        (rail_x, name_y),
+        event_date.strftime("%a %b %d, %Y").upper(),
+        font=date_font,
+        fill=FLYER_RED,
+        anchor="lt",
     )
-    draw.text((badge_cx, badge_cy), str(position), font=_font(26, bold=True), fill=TEXT_COLOR, anchor="mm")
+    name_y += 30
 
-    font_name = _font(52, bold=True)
-    draw.text((80 + badge_r * 2 + 16, badge_cy), performer_name, font=font_name, fill=TEXT_COLOR, anchor="lm")
-    text_y += badge_r * 2 + 16
-
-    # Venue
-    font_detail = _font(34)
-    draw.text((IMG_W // 2, text_y), venue_name, font=font_detail, fill=SECONDARY_COLOR, anchor="mt")
-    text_y += 50
-
-    # Event name (if set)
+    # Event name (optional, smaller, secondary)
     if event_name:
-        font_event = _font(30)
-        lines = _text_wrapped(draw, event_name, font_event, IMG_W - 160)
-        for line in lines[:2]:
-            draw.text((IMG_W // 2, text_y), line, font=font_event, fill=DIM_COLOR, anchor="mt")
-            text_y += 40
+        event_font = body_font(20)
+        for line in wrap_text(draw, event_name, event_font, rail_w)[:2]:
+            draw.text((rail_x, name_y), line, font=event_font, fill=INK_GRAY, anchor="lt")
+            name_y += 26
 
-    # Event date
-    font_date = _font(34, bold=True)
-    draw.text(
-        (IMG_W // 2, text_y),
-        event_date.strftime("%Y-%m-%d (%a)"),
-        font=font_date,
-        fill=ACCENT_COLOR,
-        anchor="mt",
+    # --- Right side: cream QR card ---
+    qr_card_size = 420
+    card_x = IMG_W - qr_card_size - SP_LG
+    card_y = (IMG_H - qr_card_size) // 2
+
+    # Cream panel behind QR
+    card_panel = Image.new("RGBA", (qr_card_size, qr_card_size), AGED_CREAM_PANEL)
+    canvas_rgba = canvas.convert("RGBA")
+    canvas_rgba.alpha_composite(card_panel, (card_x, card_y))
+    canvas = canvas_rgba.convert("RGB")
+    draw = ImageDraw.Draw(canvas)
+
+    # QR code centered inside the card
+    qr_size = qr_card_size - 2 * SP_MD
+    qr_img = generate_qr_code(url, qr_size)
+    canvas.paste(qr_img, (card_x + SP_MD, card_y + SP_MD))
+
+    # --- Corner wordmark ---
+    draw_corner_wordmark(
+        draw,
+        (SP_LG, IMG_H - SP_LG),
+        anchor="lb",
+        color=INK_GRAY,
+        size=16,
     )
 
-    # --- Bottom accent bar ---
-    draw.rectangle([(0, IMG_H - 8), (IMG_W, IMG_H)], fill=ACCENT_COLOR)
+    return _to_jpeg(canvas)
 
-    # --- Scan label above bottom bar ---
-    draw.text(
-        (IMG_W // 2, IMG_H - 40),
-        "Scan QR code for details",
-        font=_font(26),
-        fill=SECONDARY_COLOR,
-        anchor="mm",
-    )
 
-    return _to_jpeg(img)
+# --- Slide 4: combined flyer + QR ----------------------------------------------
 
 
 def generate_combined_flyer_qr_slide(
@@ -452,86 +414,76 @@ def generate_combined_flyer_qr_slide(
     position: int,
     performer_name: str,
     venue_name: str,
-    event_name: str,
+    event_name: str,  # noqa: ARG001
     event_date: date,
 ) -> bytes:
-    """Generate a combined flyer + QR code slide. Returns JPEG bytes.
+    """Flyer-as-background + QR card overlay.
 
-    The flyer image fills the background. A QR code with metadata is overlaid
-    in the bottom-right quadrant on a semi-transparent panel. The position badge
-    sits in the top-left corner.
-
-    Args:
-        flyer_bytes: Raw flyer image bytes (JPEG/PNG)
-        url: QR code target URL
-        position: Performer position index in the playlist
-        performer_name: Performer name
-        venue_name: Live house name
-        event_name: PerformanceSchedule.performance_name
-        event_date: PerformanceSchedule.performance_date
+    The flyer fills the canvas at full saturation. A small cream QR card sits
+    in the bottom-right corner with the date and venue. Position numeral
+    bleeds in from the top-left corner in vermillion.
     """
-    # --- Background: flyer image scaled to fill ---
     flyer_img = Image.open(io.BytesIO(flyer_bytes)).convert("RGB")
-    img = _scale_to_fill(flyer_img)
+    composed = scale_to_fill(flyer_img, INSTAGRAM_SQUARE)
+    composed = apply_paper_grain(composed, opacity=14)
+    draw = ImageDraw.Draw(composed)
 
-    # --- Top accent bar ---
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([(0, 0), (IMG_W, 6)], fill=ACCENT_COLOR)
+    # --- Position numeral top-left, bleeds slightly off canvas ---
+    numeral_font = display_font(200)
+    # Drop shadow for legibility against arbitrary flyer art
+    draw.text((SP_MD + 3, SP_XS + 3), f"{position:02d}", font=numeral_font, fill=PAPER_BLACK, anchor="lt")
+    draw.text((SP_MD, SP_XS), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
 
-    # --- Position badge (top-left) ---
-    draw.ellipse([(30, 20), (30 + 60, 20 + 60)], fill=ACCENT_COLOR)
-    draw.text((60, 50), str(position), font=_font(32, bold=True), fill=TEXT_COLOR, anchor="mm")
+    # --- QR card (bottom-right) ---
+    card_w = 380
+    card_h = 380
+    card_x = IMG_W - card_w - SP_LG
+    card_y = IMG_H - card_h - SP_LG
 
-    # --- QR overlay panel (bottom portion) ---
-    panel_h = 320
-    panel_y = IMG_H - panel_h
-    panel = Image.new("RGBA", (IMG_W, panel_h), (20, 20, 30, 210))
-    img_rgba = img.convert("RGBA")
-    img_rgba.paste(panel, (0, panel_y), panel)
-    img = img_rgba.convert("RGB")
-    draw = ImageDraw.Draw(img)
+    card_panel = Image.new("RGBA", (card_w, card_h), AGED_CREAM_PANEL)
+    composed_rgba = composed.convert("RGBA")
+    composed_rgba.alpha_composite(card_panel, (card_x, card_y))
+    composed = composed_rgba.convert("RGB")
+    draw = ImageDraw.Draw(composed)
 
-    # QR code (left side of panel)
-    qr_size = 250
+    # QR code
+    qr_size = 240
     qr_img = generate_qr_code(url, qr_size)
-    qr_x = 40
-    qr_y = panel_y + (panel_h - qr_size) // 2
-    img.paste(qr_img, (qr_x, qr_y))
+    qr_x = card_x + (card_w - qr_size) // 2
+    qr_y = card_y + SP_MD
+    composed.paste(qr_img, (qr_x, qr_y))
 
-    # Metadata (right side of panel, next to QR)
-    text_x = qr_x + qr_size + 30
-    text_y = panel_y + 24
+    # Caption inside the card under the QR
+    cap_top = qr_y + qr_size + SP_XS
+    name_font = body_font(22, bold=True)
+    venue_font = body_font(18)
+    date_font = body_font(20, bold=True)
 
-    # Performer name
-    font_name = _font(38, bold=True)
-    draw.text((text_x, text_y), performer_name, font=font_name, fill=TEXT_COLOR, anchor="lt")
-    text_y += 48
+    # Performer name (truncated to fit)
+    name_lines = wrap_text(draw, performer_name, name_font, card_w - 2 * SP_MD)
+    name_text = name_lines[0] if name_lines else performer_name
+    draw.text((card_x + card_w // 2, cap_top), name_text, font=name_font, fill=PAPER_BLACK, anchor="mt")
+    cap_top += 26
 
-    # Venue
-    font_detail = _font(28)
-    draw.text((text_x, text_y), venue_name, font=font_detail, fill=SECONDARY_COLOR, anchor="lt")
-    text_y += 38
-
-    # Event name (if set)
-    if event_name:
-        font_event = _font(24)
-        max_text_w = IMG_W - text_x - 30
-        lines = _text_wrapped(draw, event_name, font_event, max_text_w)
-        for line in lines[:2]:
-            draw.text((text_x, text_y), line, font=font_event, fill=DIM_COLOR, anchor="lt")
-            text_y += 32
-
-    # Event date
-    font_date = _font(30, bold=True)
     draw.text(
-        (text_x, text_y),
-        event_date.strftime("%Y-%m-%d (%a)"),
-        font=font_date,
-        fill=ACCENT_COLOR,
-        anchor="lt",
+        (card_x + card_w // 2, cap_top),
+        venue_name,
+        font=venue_font,
+        fill=INK_GRAY,
+        anchor="mt",
+    )
+    cap_top += 22
+
+    draw.text(
+        (card_x + card_w // 2, cap_top),
+        event_date.strftime("%a %b %d").upper(),
+        font=date_font,
+        fill=FLYER_RED,
+        anchor="mt",
     )
 
-    # --- Bottom accent bar ---
-    draw.rectangle([(0, IMG_H - 6), (IMG_W, IMG_H)], fill=ACCENT_COLOR)
+    # --- Corner wordmark top-right (unobtrusive) ---
+    # Position numeral owns top-left, QR card owns bottom-right.
+    draw_corner_wordmark(draw, (IMG_W - SP_MD, SP_MD), anchor="rt", color=AGED_CREAM, size=14)
 
-    return _to_jpeg(img)
+    return _to_jpeg(composed)

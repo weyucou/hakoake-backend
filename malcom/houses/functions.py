@@ -12,7 +12,24 @@ from pathlib import Path
 import edge_tts
 import numpy as np
 import ollama
-import qrcode
+from commons.design import (
+    AGED_CREAM,
+    AGED_CREAM_PANEL,
+    FLYER_RED,
+    INK_GRAY,
+    PAPER_BLACK,
+    SP_LG,
+    SP_MD,
+    SP_SM,
+    SP_XL,
+    VIDEO_WIDESCREEN,
+    body_font,
+    brand_wash_canvas,
+    build_qr_code,
+    display_font,
+    draw_corner_wordmark,
+    wrap_text,
+)
 from commons.functions import get_month_end
 from django.conf import settings
 from django.core import management
@@ -21,7 +38,7 @@ from django.utils import timezone
 from moviepy import AudioFileClip, CompositeAudioClip, ImageClip, concatenate_audioclips, concatenate_videoclips
 from moviepy.audio import fx as afx
 from performers.models import Performer, PerformerSocialLink
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from pydub import AudioSegment
 from pydub.generators import WhiteNoise
 
@@ -372,53 +389,6 @@ def apply_robotic_effects_to_audio(audio_path: Path) -> None:
     robotic_audio.export(str(audio_path), format="mp3", bitrate=settings.EDGE_TTS_BITRATE)
 
 
-def create_rgb_shift_effect(clip: ImageClip, shift_amount: int = 5) -> ImageClip:
-    """Apply RGB channel shift effect for a glitch look."""
-
-    def rgb_shift(get_frame, t):  # noqa: ANN001, ANN202
-        """Shift RGB channels to create chromatic aberration effect."""
-        frame = get_frame(t)
-        shifted = frame.copy()
-
-        # Shift red channel right
-        shifted[:, shift_amount:, 0] = frame[:, :-shift_amount, 0]
-        # Shift blue channel left
-        shifted[:, :-shift_amount, 2] = frame[:, shift_amount:, 2]
-
-        return shifted
-
-    return clip.transform(rgb_shift)
-
-
-def create_scanlines_effect(clip: ImageClip, line_height: int = 4, intensity: float = 0.3) -> ImageClip:
-    """Add horizontal scanline effect."""
-
-    def add_scanlines(get_frame, t):  # noqa: ANN001, ANN202
-        """Add horizontal scanlines to the frame."""
-        frame = get_frame(t).copy()
-        h, w = frame.shape[:2]
-
-        # Create scanline mask
-        for y in range(0, h, line_height):
-            frame[y : y + 2] = frame[y : y + 2] * (1 - intensity)
-
-        return frame
-
-    return clip.transform(add_scanlines)
-
-
-def create_glitch_transition(last_frame_path: Path, duration: float = 0.1) -> ImageClip:
-    """Create a short glitch transition clip using the last frame of previous slide."""
-    # Load the last frame
-    base_clip = ImageClip(str(last_frame_path)).with_duration(duration)
-
-    # Apply multiple glitch effects
-    glitched = create_rgb_shift_effect(base_clip, shift_amount=8)
-    glitched = create_scanlines_effect(glitched, line_height=3, intensity=0.4)
-
-    return glitched
-
-
 def _generate_introduction_text(  # noqa: C901, PLR0912, PLR0915
     playlist: MonthlyPlaylist | WeeklyPlaylist,
     entry_model: type[MonthlyPlaylistEntry] | type[WeeklyPlaylistEntry],
@@ -558,6 +528,258 @@ def generate_weekly_playlist_introduction_text(playlist: WeeklyPlaylist) -> tupl
     )
 
 
+def render_video_intro_slide(
+    title_label: str,
+    lineup: list[tuple[int, str, bool]],
+) -> Image.Image:
+    """Render the opening slide of a playlist video.
+
+    Layout:
+      - Editorial header in display serif (HAKKO-AKKEI / TOKYO LIVE HOUSES + period)
+      - Two-column numbered lineup with vermillion numerals + cream names
+      - Spotlighted performers get a small ★ marker after the name
+    """
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_WIDESCREEN
+
+    # --- Header ---
+    label_font = body_font(28, bold=True)
+    draw.text((SP_XL, SP_LG), "HAKKO-AKKEI // TOKYO LIVE HOUSES", font=label_font, fill=INK_GRAY)
+
+    title_font = display_font(96)
+    draw.text((SP_XL, SP_LG + 48), title_label, font=title_font, fill=AGED_CREAM)
+
+    # --- Two-column lineup ---
+    col_top = 280
+    col_bottom = video_h - 120
+    col_h = col_bottom - col_top
+    half = (len(lineup) + 1) // 2 if lineup else 0
+    columns = (lineup[:half], lineup[half:]) if lineup else ([], [])
+    col_x_positions = (SP_XL, video_w // 2 + SP_LG)
+
+    for col_idx, col_entries in enumerate(columns):
+        if not col_entries:
+            continue
+        col_x = col_x_positions[col_idx]
+        line_h = col_h // max(len(col_entries), 1)
+        line_h = max(70, min(line_h, 110))
+        num_font = display_font(int(line_h * 0.85))
+        name_font = display_font(int(line_h * 0.5))
+        max_name_w = (video_w // 2) - col_x - SP_LG - 140
+
+        for i, (pos, name, spotlight) in enumerate(col_entries):
+            y = col_top + i * line_h
+            draw.text(
+                (col_x, y + line_h // 2),
+                f"{pos:02d}",
+                font=num_font,
+                fill=FLYER_RED,
+                anchor="lm",
+            )
+            display_name = name + (" ★" if spotlight else "")
+            lines = wrap_text(draw, display_name, name_font, max_name_w)
+            if lines:
+                draw.text(
+                    (col_x + 130, y + line_h // 2),
+                    lines[0],
+                    font=name_font,
+                    fill=AGED_CREAM,
+                    anchor="lm",
+                )
+
+    # --- Corner wordmark ---
+    draw_corner_wordmark(draw, (SP_XL, video_h - SP_LG), anchor="lb", color=INK_GRAY, size=20)
+
+    return canvas
+
+
+def render_video_performer_slide(  # noqa: C901, PLR0913, PLR0915
+    position: int,
+    performer: Performer,
+    song_title: str,
+    venue_name: str | None,
+    performance_date: dt.date | None,
+    artist_url: str | None,
+    venue_url: str | None,
+) -> Image.Image:
+    """Render a single performer slide for the playlist video.
+
+    Layout:
+      - Left column (~58%): oversized vermillion position numeral, performer
+        name in display serif, romaji subtitle, song title, venue/date metadata
+      - Right column: up to two cream QR cards (artist + venue) stacked,
+        each labeled in cream
+    """
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_WIDESCREEN
+
+    rail_x = SP_XL
+    rail_w = int(video_w * 0.52)
+
+    # --- Section label ---
+    label_font = body_font(26, bold=True)
+    draw.text((rail_x, SP_LG), "PERFORMER // NOW PLAYING", font=label_font, fill=INK_GRAY)
+
+    # --- Position numeral ---
+    numeral_font = display_font(260)
+    draw.text((rail_x, SP_LG + 40), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
+
+    # --- Performer name (display serif) ---
+    name_font = display_font(80)
+    name_y = SP_LG + 320
+    name_lines = wrap_text(draw, performer.name, name_font, rail_w)
+    for line in name_lines[:2]:
+        draw.text((rail_x, name_y), line, font=name_font, fill=AGED_CREAM, anchor="lt")
+        name_y += 88
+
+    if performer.name_romaji and performer.name_romaji.lower() != performer.name.lower():
+        romaji_font = body_font(34)
+        draw.text((rail_x, name_y), performer.name_romaji, font=romaji_font, fill=INK_GRAY, anchor="lt")
+        name_y += 44
+
+    # --- Song title ---
+    if song_title:
+        song_font = body_font(28, bold=False)
+        draw.text((rail_x, name_y + SP_SM), f'"{song_title}"', font=song_font, fill=AGED_CREAM, anchor="lt")
+        name_y += SP_SM + 36
+
+    # --- Venue + date ---
+    if venue_name or performance_date:
+        meta_top = name_y + SP_SM
+        date_font = body_font(28, bold=True)
+        venue_font = body_font(28, bold=True)
+        if performance_date:
+            draw.text(
+                (rail_x, meta_top),
+                performance_date.strftime("%a %b %d, %Y").upper(),
+                font=date_font,
+                fill=FLYER_RED,
+                anchor="lt",
+            )
+            meta_top += 38
+        if venue_name:
+            draw.text((rail_x, meta_top), venue_name, font=venue_font, fill=AGED_CREAM, anchor="lt")
+
+    # --- Right-column QR cards ---
+    qr_targets: list[tuple[str, str]] = []
+    if artist_url:
+        qr_targets.append((artist_url, "ARTIST"))
+    if venue_url:
+        qr_targets.append((venue_url, "VENUE"))
+
+    if qr_targets:
+        card_size = 360 if len(qr_targets) > 1 else 460
+        gap = SP_LG
+        total_h = len(qr_targets) * card_size + (len(qr_targets) - 1) * gap
+        start_y = (video_h - total_h) // 2
+        card_x = video_w - card_size - SP_XL
+        canvas_rgba = canvas.convert("RGBA")
+        for idx in range(len(qr_targets)):
+            card_y = start_y + idx * (card_size + gap)
+            panel = Image.new("RGBA", (card_size, card_size), AGED_CREAM_PANEL)
+            canvas_rgba.alpha_composite(panel, (card_x, card_y))
+        canvas = canvas_rgba.convert("RGB")
+        draw = ImageDraw.Draw(canvas)
+
+        for idx, (url, label) in enumerate(qr_targets):
+            card_y = start_y + idx * (card_size + gap)
+            inner = card_size - 2 * SP_MD - 36  # reserve room for label below
+            qr_img = build_qr_code(url, inner)
+            qr_offset = card_x + (card_size - inner) // 2
+            canvas.paste(qr_img, (qr_offset, card_y + SP_MD))
+
+            label_font = body_font(22, bold=True)
+            draw.text(
+                (card_x + card_size // 2, card_y + card_size - SP_MD),
+                label,
+                font=label_font,
+                fill=PAPER_BLACK,
+                anchor="mb",
+            )
+
+    # --- Corner wordmark ---
+    draw_corner_wordmark(draw, (SP_XL, video_h - SP_LG), anchor="lb", color=INK_GRAY, size=20)
+
+    return canvas
+
+
+def render_video_closing_slide(closing_text: str, channel_url: str) -> Image.Image:
+    """Render the closing slide of the playlist video.
+
+    Layout:
+      - Editorial header
+      - Big display-serif closing message
+      - Centered cream QR card with the YouTube channel link
+    """
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_WIDESCREEN
+
+    # --- Header ---
+    label_font = body_font(28, bold=True)
+    draw.text(
+        (video_w // 2, SP_LG),
+        "HAKKO-AKKEI // SUBSCRIBE",
+        font=label_font,
+        fill=INK_GRAY,
+        anchor="mt",
+    )
+
+    # --- Closing message ---
+    closing_font = display_font(108)
+    closing_lines = wrap_text(draw, closing_text, closing_font, video_w - 4 * SP_XL)
+    msg_top = 200
+    for line in closing_lines[:2]:
+        draw.text((video_w // 2, msg_top), line, font=closing_font, fill=AGED_CREAM, anchor="mt")
+        msg_top += 120
+
+    follow_font = body_font(34, bold=True)
+    draw.text(
+        (video_w // 2, msg_top + SP_MD),
+        "Follow @hakkoakkei for more Tokyo live houses",
+        font=follow_font,
+        fill=FLYER_RED,
+        anchor="mt",
+    )
+
+    # --- QR card ---
+    card_size = 360
+    card_x = (video_w - card_size) // 2
+    card_y = video_h - card_size - SP_XL
+    canvas_rgba = canvas.convert("RGBA")
+    panel = Image.new("RGBA", (card_size, card_size), AGED_CREAM_PANEL)
+    canvas_rgba.alpha_composite(panel, (card_x, card_y))
+    canvas = canvas_rgba.convert("RGB")
+    draw = ImageDraw.Draw(canvas)
+
+    qr_inner = card_size - 2 * SP_MD - 36
+    qr_img = build_qr_code(channel_url, qr_inner)
+    canvas.paste(qr_img, (card_x + (card_size - qr_inner) // 2, card_y + SP_MD))
+
+    qr_label_font = body_font(22, bold=True)
+    draw.text(
+        (card_x + card_size // 2, card_y + card_size - SP_MD),
+        "YOUTUBE CHANNEL",
+        font=qr_label_font,
+        fill=PAPER_BLACK,
+        anchor="mb",
+    )
+
+    # Music credit (small, low-key)
+    credit_font = body_font(18)
+    draw.text(
+        (video_w // 2, card_y - SP_SM),
+        "Music: Get in the Groove — Psychedelic Grunge Instrumental — nickpanek",
+        font=credit_font,
+        fill=INK_GRAY,
+        anchor="mb",
+    )
+
+    return canvas
+
+
 def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
     playlist: MonthlyPlaylist | WeeklyPlaylist,
     intro_text_func: Callable,
@@ -568,7 +790,6 @@ def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
     closing_text: str,
     filename_prefix: str,
     timestamp_format: str,
-    bullet_char: str = "•",
     intro_text: str | None = None,
 ) -> Path:
     """Unified video generator for monthly/weekly playlists."""
@@ -583,153 +804,27 @@ def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
     temp_dir = Path(tempfile.mkdtemp())
     logger.info(f"Created temp directory: {temp_dir}")
 
-    # Video settings
-    video_width = 1920
-    video_height = 1080
     slide_duration = 8  # seconds per slide
-    bg_color = (20, 20, 30)  # Dark blue background
-    text_color = (255, 255, 255)  # White text
-
-    slides = []
-
-    # Load background image
-    background_image_path = Path(settings.BASE_DIR).parent / "static" / "hakkoake_slide_background_202511.png"
-    background_image = None
-    if background_image_path.exists():
-        try:
-            background_image = Image.open(background_image_path).convert("RGBA")
-            background_image = background_image.resize((video_width, video_height), Image.Resampling.LANCZOS)
-            alpha = background_image.split()[3]
-            alpha = alpha.point(lambda p: int(p * 0.8))
-            background_image.putalpha(alpha)
-            logger.info(f"Loaded background image: {background_image_path}")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Failed to load background image: {e}")
-            background_image = None
-    else:
-        logger.warning(f"Background image not found: {background_image_path}")
-
-    # Helper function to create QR code
-    def create_qr_code(url: str, size: int = 200) -> Image.Image:
-        qr = qrcode.QRCode(version=1, box_size=10, border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        return qr.make_image(fill_color="black", back_color="white").resize((size, size))
-
-    # Helper function to create slide
-    def create_slide(  # noqa: C901, PLR0912, PLR0915
-        title: str,
-        subtitle: str = "",
-        description: str = "",
-        qr_urls: list[str] | None = None,
-        qr_labels: list[str] | None = None,
-    ) -> Image.Image:
-        img = Image.new("RGB", (video_width, video_height), bg_color)
-
-        if background_image:
-            img = img.convert("RGBA")
-            img = Image.alpha_composite(img, background_image)
-            img = img.convert("RGB")
-
-        draw = ImageDraw.Draw(img)
-
-        # Try to load fonts that support Japanese characters
-        try:
-            title_font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 80, index=0)
-        except (OSError, ValueError):
-            try:
-                title_font = ImageFont.truetype("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 80)
-            except OSError:
-                title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
-
-        try:
-            subtitle_font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 40, index=0)
-        except (OSError, ValueError):
-            try:
-                subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 40)
-            except OSError:
-                subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 40)
-
-        try:
-            description_font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 32, index=0)
-        except (OSError, ValueError):
-            try:
-                description_font = ImageFont.truetype("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 32)
-            except OSError:
-                description_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
-
-        try:
-            small_font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 30, index=0)
-        except (OSError, ValueError):
-            try:
-                small_font = ImageFont.truetype("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 30)
-            except OSError:
-                small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
-
-        # Draw title
-        title_bbox = draw.textbbox((0, 0), title, font=title_font)
-        title_width = title_bbox[2] - title_bbox[0]
-        title_x = (video_width - title_width) // 2
-        draw.text((title_x, 200), title, fill=text_color, font=title_font)
-
-        if subtitle:
-            subtitle_bbox = draw.textbbox((0, 0), subtitle, font=subtitle_font)
-            subtitle_width = subtitle_bbox[2] - subtitle_bbox[0]
-            subtitle_x = (video_width - subtitle_width) // 2
-            draw.text((subtitle_x, 350), subtitle, fill=text_color, font=subtitle_font)
-
-        if description:
-            description_bbox = draw.textbbox((0, 0), description, font=description_font)
-            description_width = description_bbox[2] - description_bbox[0]
-            description_x = (video_width - description_width) // 2
-            draw.text((description_x, 450), description, fill=text_color, font=description_font)
-
-        if qr_urls:
-            qr_size = 200
-            qr_y = 550
-            total_qr_width = len(qr_urls) * qr_size + (len(qr_urls) - 1) * 400
-            qr_x_start = (video_width - total_qr_width) // 2
-
-            for i, url in enumerate(qr_urls):
-                qr_img = create_qr_code(url, qr_size)
-                qr_x = qr_x_start + i * (qr_size + 400)
-                img.paste(qr_img, (qr_x, qr_y))
-
-                if qr_labels and i < len(qr_labels):
-                    label = qr_labels[i]
-                else:
-                    label = "Artist" if i == 0 else "Venue"
-                label_bbox = draw.textbbox((0, 0), label, font=small_font)
-                label_width = label_bbox[2] - label_bbox[0]
-                label_x = qr_x + (qr_size - label_width) // 2
-                draw.text((label_x, qr_y + qr_size + 10), label, fill=text_color, font=small_font)
-
-        return img
+    slides: list[Path] = []
 
     entry_set = getattr(playlist, entry_set_name).select_related("song__performer")
 
-    # 1. Create intro slide
+    # 1. Intro slide
     logger.info("Creating intro slide...")
-    performer_list_items = []
+    intro_lineup: list[tuple[int, str, bool]] = []
     for entry in entry_set.order_by("position"):
         performer = entry.song.performer
-        performer_text = f"{performer.name} ({performer.name_romaji})"
-        if entry.is_spotlight:
-            performer_text += " *SPOTLIGHTED*"
-        performer_list_items.append(f"{bullet_char} {performer_text}")
+        intro_lineup.append((entry.position, performer.name, entry.is_spotlight))
 
-    performer_list = "\n".join(performer_list_items)
-
-    intro_slide = create_slide(
-        title=f"HAKKO-AKKEI - {title_label}",
-        subtitle="Tokyo Live House Music Scene",
-        description=performer_list,
+    intro_slide = render_video_intro_slide(
+        title_label=title_label,
+        lineup=intro_lineup,
     )
     intro_path = temp_dir / "slide_intro.png"
     intro_slide.save(intro_path)
     slides.append(intro_path)
 
-    # 2. Create slides for each performer
+    # 2. Performer slides
     entries = list(entry_set.order_by("position"))
     logger.info(f"Creating {len(entries)} performer slides...")
     for entry in entries:
@@ -745,50 +840,33 @@ def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
             .first()
         )
 
-        qr_urls = []
         artist_url = performer.website if performer.website else entry.song.youtube_url
-        if artist_url:
-            qr_urls.append(artist_url)
+        venue_url = (
+            performance.live_house.website.url
+            if performance and hasattr(performance.live_house, "website") and performance.live_house.website.url
+            else None
+        )
+        venue_name = performance.live_house.name if performance else None
+        perf_date = performance.performance_date if performance else None
 
-        if performance and hasattr(performance.live_house, "website") and performance.live_house.website.url:
-            qr_urls.append(performance.live_house.website.url)
-
-        subtitle = f"{performer.name} ({performer.name_romaji})" if performer.name_romaji else performer.name
-        if performance:
-            perf_date = performance.performance_date.strftime("%B %d (%a)")
-            if performer.name_romaji:
-                subtitle = f"{performer.name} ({performer.name_romaji})\n{perf_date} @ {performance.live_house.name}"
-            else:
-                subtitle = f"{performer.name}\n{perf_date} @ {performance.live_house.name}"
-
-        description = f'"{entry.song.title}"' if entry.song.title else ""
-
-        qr_labels = []
-        if qr_urls:
-            qr_labels.append(performer.name_romaji if performer.name_romaji else performer.name)
-            if len(qr_urls) > 1:
-                venue_label = f"{performance.live_house.name} (venue)" if performance else "Venue"
-                qr_labels.append(venue_label)
-
-        performer_slide = create_slide(
-            title=f"#{entry.position}",
-            subtitle=subtitle,
-            description=description,
-            qr_urls=qr_urls if qr_urls else None,
-            qr_labels=qr_labels if qr_labels else None,
+        performer_slide = render_video_performer_slide(
+            position=entry.position,
+            performer=performer,
+            song_title=entry.song.title or "",
+            venue_name=venue_name,
+            performance_date=perf_date,
+            artist_url=artist_url,
+            venue_url=venue_url,
         )
         performer_path = temp_dir / f"slide_performer_{entry.position:02d}.png"
         performer_slide.save(performer_path)
         slides.append(performer_path)
 
-    # 3. Create closing slide
+    # 3. Closing slide
     logger.info("Creating closing slide...")
-    closing_slide = create_slide(
-        title=closing_text,
-        subtitle="Follow @hakkoakkei for more Live House music",
-        description="Background Music: Get in the Groove – Psychedelic Grunge Instrumental - nickpanek",
-        qr_urls=["https://www.youtube.com/@hakkoakkei"],
-        qr_labels=["HAKKO-AKKEI YouTube"],
+    closing_slide = render_video_closing_slide(
+        closing_text=closing_text,
+        channel_url="https://www.youtube.com/@hakkoakkei",
     )
     closing_path = temp_dir / "slide_closing.png"
     closing_slide.save(closing_path)
@@ -906,24 +984,14 @@ def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
 
             video_clips.append(clip)
 
-            if idx < len(slides) - 1:
-                glitch_duration = 0.1
-                glitch_clip = create_glitch_transition(slide_path, duration=glitch_duration)
-                video_clips.append(glitch_clip)
-
-        logger.info(f"Created {len(video_clips)} video clips with individual audio tracks and glitch transitions")
+        logger.info(f"Created {len(video_clips)} video clips with individual audio tracks (hard cuts)")
 
     else:
-        for idx, slide_path in enumerate(slides):
+        for slide_path in slides:
             clip = ImageClip(str(slide_path)).with_duration(slide_duration)
             video_clips.append(clip)
 
-            if idx < len(slides) - 1:
-                glitch_duration = 0.1
-                glitch_clip = create_glitch_transition(slide_path, duration=glitch_duration)
-                video_clips.append(glitch_clip)
-
-        logger.info(f"Created {len(video_clips)} video clips with fixed duration and glitch transitions")
+        logger.info(f"Created {len(video_clips)} video clips with fixed duration (hard cuts)")
 
     final_video = concatenate_videoclips(video_clips, method="compose")
 
@@ -1003,7 +1071,6 @@ def generate_playlist_video(playlist: MonthlyPlaylist, intro_text: str | None = 
         closing_text="See You Next Month!",
         filename_prefix="playlist_intro_",
         timestamp_format="%Y%m",
-        bullet_char="•",
         intro_text=intro_text,
     )
 
@@ -1021,6 +1088,5 @@ def generate_weekly_playlist_video(playlist: WeeklyPlaylist, intro_text: str | N
         closing_text="See You Next Week!",
         filename_prefix="playlist_intro_week_",
         timestamp_format="%Y%m%d",
-        bullet_char="-",
         intro_text=intro_text,
     )

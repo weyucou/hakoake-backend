@@ -10,6 +10,14 @@ Django project with SQLite database for collecting band performance data from li
 - **ruff** - Linting/formatting
 - **Django test runner** - Testing (NOT pytest — `uv run poe test` runs `cd malcom && uv run python manage.py test --debug-mode`)
 
+
+## Environment Variables
+
+`.env` defines project related environment varialbles
+
+ALWAYS apply `.env` defined environment variables when running mangement commands or scripts.
+
+
 ## Development Commands
 
 All commands must be run from the **`malcom/`** subdirectory (where `manage.py` lives), or via `poe` tasks from the repo root.
@@ -33,10 +41,16 @@ All source files live under `malcom/` — always include the prefix when staging
 git add malcom/commons/youtube_utils.py malcom/houses/management/commands/foo.py
 ```
 
-`ellen-goc` does **not** have push access to `monkut/hakoake-backend`. Use the `fork` remote to push branches and open PRs:
+`origin` (`monkut/hakoake-backend`) is upstream and the PR target. Most contributors do **not** have push access to it. Push branches to the `fork` remote (`weyucou/hakoake-backend`) and open cross-repo PRs against `origin`:
 ```bash
-git push fork <branch-name>
-gh pr create --repo monkut/hakoake-backend --head "ellen-goc:<branch-name>" --base main ...
+git push -u fork <branch-name>
+gh pr create --repo monkut/hakoake-backend --head "weyucou:<branch-name>" --base main
+```
+
+Verify your remotes match this layout before pushing:
+```
+origin  https://github.com/monkut/hakoake-backend.git   # upstream, PR target
+fork    https://github.com/weyucou/hakoake-backend.git  # push branches here
 ```
 
 ## Testing Conventions
@@ -56,6 +70,15 @@ This project uses `ruff` with `select = ["ALL"]`. Tests must follow these rules 
 ```bash
 value=$(uv run python manage.py my_command --json | jq -r '.field')
 ```
+
+## Design System
+
+All Instagram carousel slides and playlist video slides share a single
+visual system defined in `malcom/commons/design.py` (palette, fonts,
+spacing, layout helpers). Display type is **Shippori Mincho B1 Bold**
+(committed under `malcom/commons/fonts/`); body type is Noto Sans CJK JP.
+The aesthetic is documented in `DESIGN.md` at the repo root — read it
+before adding new slide layouts so the two pipelines do not drift again.
 
 ## Crawler Development
 
@@ -104,10 +127,8 @@ All commands must be run from the `malcom/` directory: `cd malcom && uv run pyth
 |---------|---------|-------------|
 | `generate_weekly_playlist_introduction` | Generate AI narration for weekly video | `<playlist_id>`, `--audio`, `--voice` |
 | `generate_weekly_playlist_video` | Create weekly playlist video (auto-generates narration) | `<playlist_id>`, `--intro-text-file` |
-| `create_weekly_playlist_intro_video` | Create intro video for weekly playlist | `<playlist_id>`, `--output`, `--duration` |
 | `generate_playlist_introduction` | Generate AI narration for monthly video | `<target_month>` |
 | `generate_playlist_video` | Create monthly playlist video | `<target_month>` |
-| `create_monthly_playlist_intro_video` | Create intro video for monthly playlist | `<target_month>` |
 | `generate_tts_samples` | Generate TTS audio samples with different tunings | `--count`, `--text`, `--output-dir`, `--voice` |
 
 **Weekly video workflow:**
