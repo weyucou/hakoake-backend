@@ -23,7 +23,7 @@ from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Min, Q
 from django.utils import timezone
 from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import MonthlyPlaylist, MonthlyPlaylistEntry
@@ -102,6 +102,15 @@ class Command(BaseCommand):
                 performance_schedules__performance_date__gte=month_start,
                 performance_schedules__performance_date__lt=month_end,
             )
+            .annotate(
+                earliest_performance_date=Min(
+                    "performance_schedules__performance_date",
+                    filter=Q(
+                        performance_schedules__performance_date__gte=month_start,
+                        performance_schedules__performance_date__lt=month_end,
+                    ),
+                ),
+            )
             .distinct()
             .order_by("-playlist_weight", "name")
         )
@@ -168,6 +177,9 @@ class Command(BaseCommand):
                     f"Only {len(selected_songs)} unique performers/songs found (expected {TOP_PERFORMERS_COUNT})"
                 ),
             )
+
+        # Selection is driven by playlist_weight; output order by performance date.
+        selected_songs.sort(key=lambda ps: ps[0].earliest_performance_date)
 
         lineup_lines = build_lineup_lines(selected_songs, month_start, month_end)
 

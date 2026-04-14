@@ -25,7 +25,7 @@ from commons.youtube_utils import add_video_to_playlist, create_youtube_playlist
 from django.conf import settings
 from django.core.management import BaseCommand, CommandParser
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Min, Q
 from django.utils import timezone
 from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import WeeklyPlaylist, WeeklyPlaylistEntry
@@ -222,6 +222,15 @@ class Command(BaseCommand):
                 performance_schedules__performance_date__gte=week_start,
                 performance_schedules__performance_date__lt=week_end,
             )
+            .annotate(
+                earliest_performance_date=Min(
+                    "performance_schedules__performance_date",
+                    filter=Q(
+                        performance_schedules__performance_date__gte=week_start,
+                        performance_schedules__performance_date__lt=week_end,
+                    ),
+                ),
+            )
             .distinct()
             .order_by("-playlist_weight", "name")
         )
@@ -299,6 +308,9 @@ class Command(BaseCommand):
                 )
             )
             return
+
+        # Selection is driven by playlist_weight; output order by performance date.
+        selected_songs.sort(key=lambda ps: ps[0].earliest_performance_date)
 
         lineup_lines = build_lineup_lines(selected_songs, week_start, week_end)
 
