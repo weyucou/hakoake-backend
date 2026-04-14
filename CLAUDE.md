@@ -41,17 +41,45 @@ All source files live under `malcom/` — always include the prefix when staging
 git add malcom/commons/youtube_utils.py malcom/houses/management/commands/foo.py
 ```
 
-`origin` (`monkut/hakoake-backend`) is upstream and the PR target. Most contributors do **not** have push access to it. Push branches to the `fork` remote (`weyucou/hakoake-backend`) and open cross-repo PRs against `origin`:
-```bash
-git push -u fork <branch-name>
-gh pr create --repo monkut/hakoake-backend --head "weyucou:<branch-name>" --base main
+### Two repos, one direction of travel
+
+| Repo | Local remote | Role |
+|------|--------------|------|
+| `monkut/hakoake-backend` | `origin` | **Source of truth.** All issues filed here. All PRs open here. `ellen-goc` and most contributors have **read-only** access — cannot push branches directly. |
+| `weyucou/hakoake-backend` | `fork` | **Working fork.** All feature branches are pushed here. Cross-repo PRs are opened from `weyucou:<branch>` → `monkut:main`. After merge, `weyucou/main` is synced from `monkut/main`. |
+
+### Flow
+
+1. **File the issue** on `monkut/hakoake-backend`:
+   ```bash
+   gh issue create -R monkut/hakoake-backend ...
+   ```
+2. **Push the branch** to `fork` (weyucou):
+   ```bash
+   git push -u fork <branch-name>
+   ```
+3. **Open the PR** against `monkut:main` from the weyucou fork:
+   ```bash
+   gh pr create -R monkut/hakoake-backend \
+     --head "weyucou:<branch-name>" --base main
+   ```
+4. **After merge**, sync the working fork's main from monkut:
+   ```bash
+   gh repo sync weyucou/hakoake-backend -b main
+   ```
+
+Expected `git remote -v` layout (names are fixed — do not rename):
+```
+origin  https://github.com/monkut/hakoake-backend.git   # source of truth, PR target
+fork    https://github.com/weyucou/hakoake-backend.git  # working fork; push branches here
 ```
 
-Verify your remotes match this layout before pushing:
-```
-origin  https://github.com/monkut/hakoake-backend.git   # upstream, PR target
-fork    https://github.com/weyucou/hakoake-backend.git  # push branches here
-```
+### Anti-patterns
+
+- ❌ Do **not** file issues on `weyucou/hakoake-backend`.
+- ❌ Do **not** open PRs against `weyucou/hakoake-backend` (PRs target `monkut/hakoake-backend:main`).
+- ❌ Do **not** push branches to a personal fork (e.g. `ellen-goc/hakoake-backend`) — branches live on `weyucou/hakoake-backend` so everyone can see in-flight work.
+- ❌ Do **not** run `askcc` with a `weyucou/hakoake-backend` issue URL. Use the `monkut/hakoake-backend` URL.
 
 ## Testing Conventions
 
