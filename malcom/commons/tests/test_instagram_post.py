@@ -64,7 +64,7 @@ class TestPostCarousel(TestCase):
     @patch("commons.instagram_post.wait_for_container_finished", return_value=None)
     @patch("commons.instagram_post.create_carousel_container", return_value="parent-99")
     @patch("commons.instagram_post.create_carousel_item")
-    @patch("commons.instagram_post.upload_to_catbox")
+    @patch("commons.instagram_post.upload_to_litterbox")
     def test_end_to_end_happy_path(
         self,
         mock_upload: MagicMock,
@@ -74,9 +74,9 @@ class TestPostCarousel(TestCase):
         mock_publish: MagicMock,
     ) -> None:
         mock_upload.side_effect = [
-            "https://files.catbox.moe/cover.jpg",
-            "https://files.catbox.moe/slide1.jpg",
-            "https://files.catbox.moe/slide2.jpg",
+            "https://litter.catbox.moe/cover.jpg",
+            "https://litter.catbox.moe/slide1.jpg",
+            "https://litter.catbox.moe/slide2.jpg",
         ]
         mock_create_item.side_effect = ["c1", "c2", "c3"]
 

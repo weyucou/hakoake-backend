@@ -8,43 +8,47 @@ import requests
 YYYY_MM_LENGTH = 7
 YYYY_MM_DD_LENGTH = 10
 
-CATBOX_API_URL = "https://catbox.moe/user/api.php"
+LITTERBOX_API_URL = "https://litterbox.catbox.moe/resources/internals/api.php"
+LITTERBOX_TTL = "1h"
 
 logger = logging.getLogger(__name__)
 
 
-class CatboxUploadError(RuntimeError):
-    """Raised when a catbox.moe upload fails."""
+class LitterboxUploadError(RuntimeError):
+    """Raised when a litterbox.catbox.moe upload fails."""
 
 
-def upload_to_catbox(image_bytes: bytes, filename: str = "image.jpg") -> str:
-    """Upload bytes to catbox.moe anonymously and return the public HTTPS URL.
+def upload_to_litterbox(image_bytes: bytes, filename: str = "image.jpg") -> str:
+    """Upload bytes to litterbox.catbox.moe anonymously and return the public HTTPS URL.
 
-    catbox.moe accepts a multipart POST with `reqtype=fileupload` and returns the
-    URL as plain text in the response body. No API key or signup required.
-    Used wherever a public HTTPS URL is needed for content that is otherwise
-    only available as in-process bytes (e.g. Instagram `image_url` publishing).
+    litterbox.catbox.moe is catbox.moe's temporary-file sibling service. Files expire
+    after ``LITTERBOX_TTL`` (currently ``1h``) — ample for Instagram carousel container
+    creation, which completes in seconds. Accepts a multipart POST with
+    ``reqtype=fileupload`` and ``time=<ttl>`` and returns the URL as plain text.
+    No API key or signup required. Returned URLs are served from ``litter.catbox.moe``.
+    Used wherever a public HTTPS URL is needed briefly for content that is otherwise
+    only available as in-process bytes (e.g. Instagram ``image_url`` publishing).
     """
     try:
         response = requests.post(
-            CATBOX_API_URL,
-            data={"reqtype": "fileupload"},
+            LITTERBOX_API_URL,
+            data={"reqtype": "fileupload", "time": LITTERBOX_TTL},
             files={"fileToUpload": (filename, image_bytes, "image/jpeg")},
             timeout=60,
         )
     except requests.RequestException as exc:
-        raise CatboxUploadError(f"catbox upload failed for {filename!r}: {exc}") from exc
+        raise LitterboxUploadError(f"litterbox upload failed for {filename!r}: {exc}") from exc
 
     if response.status_code != 200:  # noqa: PLR2004
-        raise CatboxUploadError(
-            f"catbox upload failed for {filename!r}: HTTP {response.status_code} — {response.text[:200]}"
+        raise LitterboxUploadError(
+            f"litterbox upload failed for {filename!r}: HTTP {response.status_code} — {response.text[:200]}"
         )
 
     url = response.text.strip()
     if not url.startswith("https://"):
-        raise CatboxUploadError(f"catbox returned unexpected response for {filename!r}: {url[:200]!r}")
+        raise LitterboxUploadError(f"litterbox returned unexpected response for {filename!r}: {url[:200]!r}")
 
-    logger.debug(f"Uploaded {filename!r} to catbox: {url}")
+    logger.debug(f"Uploaded {filename!r} to litterbox: {url}")
     return url
 
 
