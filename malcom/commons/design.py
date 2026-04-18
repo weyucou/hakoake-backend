@@ -191,12 +191,11 @@ def load_brand_background(target_size: tuple[int, int]) -> Image.Image | None:
     return scale_to_fill(bg, target_size)
 
 
-def brand_wash_canvas(size: tuple[int, int], *, apply_grain: bool = True) -> Image.Image:
-    """Build the shared base canvas: brand bg photo + dark wash + optional paper grain.
+def brand_wash_canvas(size: tuple[int, int]) -> Image.Image:
+    """Build the shared base canvas: brand bg photo + dark wash.
 
-    Used by every video slide and by the Instagram playlist cover. Falls back
-    to a PAPER_BLACK canvas if the brand photo is unavailable.
-    Pass apply_grain=False for video slides where frame-identical grain creates a glitch artifact.
+    Used by every video slide. Falls back to a PAPER_BLACK canvas if the
+    brand photo is unavailable.
     """
     base = load_brand_background(size)
     if base is None:
@@ -204,10 +203,7 @@ def brand_wash_canvas(size: tuple[int, int], *, apply_grain: bool = True) -> Ima
     rgba = base.convert("RGBA")
     wash = Image.new("RGBA", size, PAPER_BLACK_WASH)
     rgba.alpha_composite(wash)
-    canvas = rgba.convert("RGB")
-    if apply_grain:
-        canvas = apply_paper_grain(canvas)
-    return canvas
+    return rgba.convert("RGB")
 
 
 # --- Shared QR code builder ---

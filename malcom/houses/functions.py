@@ -539,7 +539,7 @@ def render_video_intro_slide(
       - Two-column numbered lineup with vermillion numerals + cream names
       - Spotlighted performers get a small ★ marker after the name
     """
-    canvas = brand_wash_canvas(VIDEO_WIDESCREEN, apply_grain=False)
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
     draw = ImageDraw.Draw(canvas)
     video_w, video_h = VIDEO_WIDESCREEN
 
@@ -611,7 +611,7 @@ def render_video_performer_slide(  # noqa: C901, PLR0913, PLR0915
       - Right column: up to two cream QR cards (artist + venue) stacked,
         each labeled in cream
     """
-    canvas = brand_wash_canvas(VIDEO_WIDESCREEN, apply_grain=False)
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
     draw = ImageDraw.Draw(canvas)
     video_w, video_h = VIDEO_WIDESCREEN
 
@@ -713,7 +713,7 @@ def render_video_closing_slide(closing_text: str, channel_url: str) -> Image.Ima
       - Big display-serif closing message
       - Centered cream QR card with the YouTube channel link
     """
-    canvas = brand_wash_canvas(VIDEO_WIDESCREEN, apply_grain=False)
+    canvas = brand_wash_canvas(VIDEO_WIDESCREEN)
     draw = ImageDraw.Draw(canvas)
     video_w, video_h = VIDEO_WIDESCREEN
 

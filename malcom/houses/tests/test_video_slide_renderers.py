@@ -120,23 +120,16 @@ class TestRenderVideoClosingSlide(TestCase):
         self.assertEqual(img.size, VIDEO_SIZE)
 
 
-class TestBrandWashCanvasGrainFlag(TestCase):
-    """Regression: brand_wash_canvas(apply_grain=False) omits the grain layer.
+class TestBrandWashCanvasNoGrain(TestCase):
+    """Regression for hakoake-backend#52: brand_wash_canvas must not apply grain.
 
-    Video slides must pass apply_grain=False so that consecutive frames do not
-    share an identical frozen-grain texture — the root cause of hakoake-backend#52.
+    Frame-identical grain on consecutive video slides produced a frozen-texture
+    glitch. The canvas is deterministic (no grain) so this cannot recur.
     """
 
-    def test_no_grain_canvas_is_deterministic(self) -> None:
-        # Without grain the canvas is fully deterministic across calls.
-        a = brand_wash_canvas((200, 200), apply_grain=False)
-        b = brand_wash_canvas((200, 200), apply_grain=False)
+    def test_canvas_is_deterministic(self) -> None:
+        a = brand_wash_canvas((200, 200))
+        b = brand_wash_canvas((200, 200))
         self.assertEqual(a.size, (200, 200))
         self.assertEqual(a.mode, "RGB")
         self.assertEqual(list(a.getdata()), list(b.getdata()))
-
-    def test_grain_canvas_differs_from_no_grain(self) -> None:
-        # Canvases with and without grain must differ in at least one pixel.
-        no_grain = brand_wash_canvas((200, 200), apply_grain=False)
-        with_grain = brand_wash_canvas((200, 200), apply_grain=True)
-        self.assertNotEqual(list(no_grain.getdata()), list(with_grain.getdata()))
