@@ -61,7 +61,7 @@ def build_lineup_lines(
                 continue
             seen.add(key)
             venue_name = sched.live_house.name
-            date_str = sched.performance_date.strftime("%Y-%m-%d")
+            date_str = sched.performance_date.strftime("%Y-%m-%d (%a)")
             lines.append(f"{idx}. {date_str} {performer.name} @ {venue_name}")
     return lines
 
