@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hakoake-gen-video.sh — Generate weekly playlist video for hakoake.
-# Runs every Monday at 22:00 JST.
-# 1. Creates the weekly playlist for the current Monday
+# Runs every Monday at 22:00 JST, targeting next Monday's week.
+# 1. Creates the weekly playlist for next Monday
 # 2. Looks up the created playlist's DB id
 # 3. Generates the playlist video
 # 4. Posts the Instagram carousel announcement
@@ -13,8 +13,8 @@ HAKOAKE_DIR="$HOME/projects/hakoake-backend/malcom"
 LOG_DIR="$HOME/projects/hakoake-backend/logs"
 mkdir -p "$LOG_DIR"
 
-# Get Monday date in JST (the day this script runs)
-MONDAY=$(TZ=Asia/Tokyo date +%Y-%m-%d)
+# Get next Monday's date in JST (today + 7 days) — target the upcoming week
+MONDAY=$(TZ=Asia/Tokyo date -d '+7 days' +%Y-%m-%d)
 LOGFILE="$LOG_DIR/hakoake-gen-video-${MONDAY}.log"
 
 # Tee all output (stdout + stderr) to a dated log file
