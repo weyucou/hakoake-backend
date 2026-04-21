@@ -7,11 +7,19 @@ tests assert that Japanese glyphs render with real (non-notdef) widths.
 
 import io
 from datetime import date
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from PIL import Image, ImageDraw, ImageFont
 
-from commons.instagram_images import IMG_H, IMG_W, _font, generate_combined_flyer_qr_slide
+from commons.design import PAPER_BLACK
+from commons.instagram_images import (
+    IMG_H,
+    IMG_W,
+    _font,
+    generate_combined_flyer_qr_slide,
+    generate_performer_card,
+)
 
 JAPANESE_SAMPLE = "残響のリフレイン"
 LATIN_SAMPLE = "HAKKO-AKKEI"
@@ -118,3 +126,53 @@ class TestCombinedFlyerQrSlide(TestCase):
         )
         img = Image.open(io.BytesIO(result))
         self.assertEqual(img.size, (IMG_W, IMG_H))
+
+
+def _is_near_paper_black(pixel: tuple[int, int, int], tolerance: int = 15) -> bool:
+    """True if the pixel's per-channel sum-of-diffs vs PAPER_BLACK is within tolerance."""
+    return sum(abs(pixel[i] - PAPER_BLACK[i]) for i in range(3)) <= tolerance
+
+
+class TestPerformerCardFallback(TestCase):
+    """Regression guard for #57: insta-background.png must be used when no performer/event image exists.
+
+    Commit 7b7dbd5 (design-system refactor) dropped the insta-background.png
+    step originally introduced in b8aced6, so the fallback chain jumped
+    straight to solid PAPER_BLACK.
+    """
+
+    def _make_performer_with_no_images(self) -> MagicMock:
+        performer = MagicMock()
+        performer.name = "TestBand"
+        performer.name_romaji = ""
+        for field in ("performer_image", "fanart_image", "banner_image", "logo_image"):
+            empty_field = MagicMock()
+            empty_field.name = ""
+            setattr(performer, field, empty_field)
+        return performer
+
+    def test_uses_insta_background_when_performer_and_brand_bg_unavailable(self) -> None:
+        """With no performer images AND brand background patched to None, the photo
+        region must still have colour — proving insta-background.png was applied.
+        """
+        performer = self._make_performer_with_no_images()
+
+        with patch("commons.instagram_images.load_brand_background", return_value=None):
+            result = generate_performer_card(performer, position=1, schedules=[])
+
+        img = Image.open(io.BytesIO(result)).convert("RGB")
+        self.assertEqual(img.size, (IMG_W, IMG_H))
+
+        # Sample pixels from the top third of the photo region (62% of IMG_H).
+        # Paper grain adds ~1-2 units of jitter, so we tolerate 15 units of
+        # per-channel total drift when classifying a pixel as "near PAPER_BLACK".
+        photo_h = int(IMG_H * 0.62)
+        sample_y = photo_h // 4
+        pixels = [img.getpixel((x, sample_y)) for x in range(20, IMG_W, IMG_W // 16)]
+        non_black = [px for px in pixels if not _is_near_paper_black(px)]
+        self.assertGreater(
+            len(non_black),
+            len(pixels) // 2,
+            f"Performer card photo region fell through to solid PAPER_BLACK at row {sample_y}; "
+            f"insta-background.png fallback not applied. Sampled pixels: {pixels}",
+        )

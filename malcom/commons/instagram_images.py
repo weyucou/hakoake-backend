@@ -56,6 +56,13 @@ logger = logging.getLogger(__name__)
 # Kept as module-level constants for back-compat with tests and external callers.
 IMG_W, IMG_H = INSTAGRAM_SQUARE
 
+# Fallback background image used when no performer photo or event flyer is
+# available. Lives at the repo root (two levels above this module). Restored
+# from commit b8aced6; the intervening design-system refactor (7b7dbd5)
+# dropped this step, causing the fallback chain to skip straight to solid
+# PAPER_BLACK.
+_INSTA_BG = Path(__file__).resolve().parent.parent.parent / "insta-background.png"
+
 INSTAGRAM_HASHTAGS = (
     "hakoake",
     "tokyo",
@@ -109,6 +116,39 @@ def _paper_black_canvas() -> Image.Image:
     """Return a fresh PAPER_BLACK canvas with paper grain applied."""
     base = Image.new("RGB", INSTAGRAM_SQUARE, PAPER_BLACK)
     return apply_paper_grain(base)
+
+
+def _load_insta_fallback_bg(size: tuple[int, int]) -> Image.Image | None:
+    """Load `insta-background.png` scaled/cropped to `size`, composited at 60% opacity over PAPER_BLACK.
+
+    Mirrors the treatment originally introduced in commit b8aced6. Returns
+    None if the file is missing or cannot be loaded — callers should fall
+    through to the next background option.
+    """
+    if not _INSTA_BG.exists():
+        return None
+    try:
+        bg = Image.open(_INSTA_BG).convert("RGBA")
+    except (OSError, ValueError) as exc:
+        logger.debug(f"Could not load fallback background {_INSTA_BG}: {exc}")
+        return None
+
+    target_w, target_h = size
+    ratio = max(target_w / bg.width, target_h / bg.height)
+    new_w = int(bg.width * ratio)
+    new_h = int(bg.height * ratio)
+    bg = bg.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    x = (new_w - target_w) // 2
+    y = (new_h - target_h) // 2
+    bg = bg.crop((x, y, x + target_w, y + target_h))
+
+    r, g, b, a = bg.split()
+    a = a.point(lambda v: int(v * 0.6))
+    bg = Image.merge("RGBA", (r, g, b, a))
+
+    base = Image.new("RGBA", size, (*PAPER_BLACK, 255))
+    base.alpha_composite(bg)
+    return base.convert("RGB")
 
 
 def _resize_to_square(raw_bytes: bytes, size: int = 1080) -> bytes:
@@ -233,12 +273,17 @@ def generate_performer_card(
     photo_h = int(IMG_H * 0.62)
 
     # --- Photo region ---
+    # Fallback chain: performer image → insta-background.png → brand background → PAPER_BLACK.
     photo_canvas = Image.new("RGB", INSTAGRAM_SQUARE, PAPER_BLACK)
     if source_img is not None:
         photo = scale_to_fill(source_img, (IMG_W, photo_h))
     else:
-        bg = load_brand_background((IMG_W, photo_h))
-        photo = bg if bg is not None else Image.new("RGB", (IMG_W, photo_h), PAPER_BLACK)
+        insta_fallback = _load_insta_fallback_bg((IMG_W, photo_h))
+        if insta_fallback is not None:
+            photo = insta_fallback
+        else:
+            bg = load_brand_background((IMG_W, photo_h))
+            photo = bg if bg is not None else Image.new("RGB", (IMG_W, photo_h), PAPER_BLACK)
     photo_canvas.paste(photo, (0, 0))
 
     # --- Paper black caption panel under the photo ---
