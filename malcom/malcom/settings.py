@@ -285,7 +285,7 @@ THREADS_USER_ID = os.getenv("THREADS_USER_ID", "")  # populated after first OAut
 OAUTH_LOCALHOST_CERT = BASE_DIR.parent / "localhost.pem"
 OAUTH_LOCALHOST_KEY = BASE_DIR.parent / "localhost-key.pem"
 
-PLAYLIST_INTRO_TEXT_GENERATION_MODEL = "mistral-small"
+PLAYLIST_INTRO_TEXT_GENERATION_MODEL = os.getenv("PLAYLIST_INTRO_TEXT_GENERATION_MODEL", "gemma4:e4b")
 
 # TTS Configuration for video generation
 VIDEO_TTS_MODEL = "legraphista/Orpheus:3b-ft-q4_k_m"  # noqa: N806
