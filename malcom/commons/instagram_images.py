@@ -280,6 +280,10 @@ def generate_performer_card(
     else:
         insta_fallback = _load_insta_fallback_bg((IMG_W, photo_h))
         if insta_fallback is not None:
+            logger.warning(
+                "No performer image found for %s — using insta-background.png fallback",
+                performer.name,
+            )
             photo = insta_fallback
         else:
             bg = load_brand_background((IMG_W, photo_h))

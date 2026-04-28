@@ -57,6 +57,12 @@ class PerformanceSchedule(models.Model):
         null=True,
         help_text="Event flyer or promotional image",
     )
+    source_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Crawler source URL for this event's detail page",
+    )
 
     def __str__(self) -> str:
         return f"{self.live_house.name} - {self.performance_date} {self.start_time}"

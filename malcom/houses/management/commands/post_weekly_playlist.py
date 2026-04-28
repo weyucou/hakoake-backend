@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import io
 import logging
 from datetime import timedelta
 
@@ -32,10 +33,34 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
 from houses.formatting import build_lineup_lines, build_playlist_description
 from houses.models import PerformanceSchedule, WeeklyPlaylist, WeeklyPlaylistEntry
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 MAX_CAROUSEL_SLIDES = 10
+_MIN_FLYER_DIMENSION = 200
+_BLACK_THRESHOLD = 10  # per-channel sum below this → effectively black
+_WHITE_THRESHOLD = 740  # per-channel sum above this → effectively white (255*3=765)
+
+
+def _is_valid_flyer(raw: bytes) -> bool:
+    """Return False if the image is too small or is uniformly black/white (likely a placeholder icon)."""
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:  # noqa: BLE001
+        return False
+    if img.width < _MIN_FLYER_DIMENSION or img.height < _MIN_FLYER_DIMENSION:
+        return False
+    # Sample a grid of pixels; reject if all are near-black or all are near-white.
+    pixels = [
+        img.getpixel((x, y))
+        for x in range(0, img.width, img.width // 4 + 1)
+        for y in range(0, img.height, img.height // 4 + 1)
+    ]
+    channel_sums = [r + g + b for r, g, b in pixels]
+    all_black = all(s <= _BLACK_THRESHOLD for s in channel_sums)
+    all_white = all(s >= _WHITE_THRESHOLD for s in channel_sums)
+    return not all_black and not all_white
 
 
 def _post_instagram(
@@ -190,23 +215,24 @@ class Command(BaseCommand):
                 .first()
             )
 
-            # Get flyer image bytes (event image or generated performer card)
+            # Get flyer image bytes: event image (if valid) → performer card with insta-background fallback.
+            flyer_bytes = None
             if schedule and schedule.event_image and schedule.event_image.name:
+                raw = None
                 try:
                     with schedule.event_image.open("rb") as f:
                         raw = f.read()
-                    flyer_bytes = _resize_to_square(raw, 1080)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning(f"Could not load event_image for {performer.name}: {exc}; using performer card")
-                    all_schedules = list(
-                        PerformanceSchedule.objects.filter(
-                            performers=performer,
-                            performance_date__gte=week_start,
-                            performance_date__lt=week_end,
-                        ).select_related("live_house")
+                    logger.warning(f"Could not read event_image for {performer.name}: {exc}")
+                if raw and _is_valid_flyer(raw):
+                    flyer_bytes = _resize_to_square(raw, 1080)
+                elif raw is not None:
+                    logger.warning(
+                        "event_image for %s rejected (too small or uniform colour): %s; using performer card",
+                        performer.name,
+                        schedule.event_image.name,
                     )
-                    flyer_bytes = generate_performer_card(performer, pos, all_schedules)
-            else:
+            if flyer_bytes is None:
                 all_schedules = list(
                     PerformanceSchedule.objects.filter(
                         performers=performer,

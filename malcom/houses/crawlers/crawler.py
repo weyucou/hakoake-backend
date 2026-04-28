@@ -489,6 +489,10 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         performance, _created = PerformanceSchedule.objects.get_or_create(
             live_house=live_house, performance_date=performance_date, start_time=start_time, defaults=defaults
         )
+        source_url = data.get("source_url", "")
+        if source_url and not performance.source_url:
+            performance.source_url = source_url
+            performance.save(update_fields=["source_url"])
         return performance
 
     def _save_and_link_performers(self, performance: PerformanceSchedule, valid_performers: list[Performer]) -> None:
