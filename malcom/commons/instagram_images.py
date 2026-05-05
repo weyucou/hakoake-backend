@@ -119,7 +119,7 @@ def _paper_black_canvas() -> Image.Image:
 
 
 def _load_insta_fallback_bg(size: tuple[int, int]) -> Image.Image | None:
-    """Load `insta-background.png` scaled/cropped to `size`, composited at 60% opacity over PAPER_BLACK.
+    """Load `insta-background.png` scaled/cropped to `size`, composited at 72% opacity over PAPER_BLACK.
 
     Mirrors the treatment originally introduced in commit b8aced6. Returns
     None if the file is missing or cannot be loaded — callers should fall
@@ -143,7 +143,7 @@ def _load_insta_fallback_bg(size: tuple[int, int]) -> Image.Image | None:
     bg = bg.crop((x, y, x + target_w, y + target_h))
 
     r, g, b, a = bg.split()
-    a = a.point(lambda v: int(v * 0.6))
+    a = a.point(lambda v: int(v * 0.72))
     bg = Image.merge("RGBA", (r, g, b, a))
 
     base = Image.new("RGBA", size, (*PAPER_BLACK, 255))
