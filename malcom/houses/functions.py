@@ -38,7 +38,7 @@ from django.db.models import Count
 from django.utils import timezone
 from moviepy import AudioFileClip, CompositeAudioClip, ImageClip, concatenate_audioclips, concatenate_videoclips
 from moviepy.audio import fx as afx
-from performers.models import Performer, PerformerSocialLink
+from performers.models import Performer, PerformerSocialLink, PerformerSong
 from PIL import Image, ImageDraw
 from pydub import AudioSegment
 from pydub.generators import WhiteNoise
@@ -831,6 +831,49 @@ SHORTS_INTRO_DURATION = 3.0
 SHORTS_PERFORMER_DURATION = 4.0
 SHORTS_CLOSING_DURATION = 3.0
 SHORTS_MAX_TOTAL_DURATION = 60.0
+SHORTS_AUDIO_FADE_DURATION = 0.5
+PERFORMER_SAMPLES_DIR = "performer_samples"
+
+
+def download_performer_song_audio(song: PerformerSong, *, force: bool = False) -> Path | None:
+    """Download audio from a performer's YouTube song, caching to data/performer_samples/<song_id>.mp3.
+
+    Returns the cached path, or None if the song has no YouTube URL or download fails.
+    """
+    if not song.youtube_url:
+        return None
+
+    import yt_dlp  # noqa: PLC0415
+
+    samples_dir = Path(settings.BASE_DIR) / "data" / PERFORMER_SAMPLES_DIR
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    output_path = samples_dir / f"{song.id}.mp3"
+
+    if output_path.exists() and not force:
+        return output_path
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+        "outtmpl": str(samples_dir / f"{song.id}.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([song.youtube_url])
+        if output_path.exists():
+            logger.info(f"Downloaded audio for {song.performer.name}: {output_path}")
+            return output_path
+    except Exception:  # noqa: BLE001
+        logger.exception(f"Failed to download audio for song id={song.id} ({song.youtube_url})")
+    return None
 
 
 def render_shorts_intro_slide(
@@ -1357,7 +1400,7 @@ def generate_weekly_playlist_video(playlist: WeeklyPlaylist, intro_text: str | N
     )
 
 
-def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915
+def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901
     playlist: MonthlyPlaylist | WeeklyPlaylist,
     entry_set_name: str,
     date_start: dt.date,
@@ -1400,8 +1443,9 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915
     intro_slide.save(intro_path)
     slides.append((intro_path, SHORTS_INTRO_DURATION))
 
-    # 2. Performer slides
+    # 2. Performer slides — collect (path, duration, song) so we can build per-performer audio
     logger.info(f"Creating {len(entries)} shorts performer slides...")
+    performer_entries: list[tuple[Path, float, PerformerSong | None]] = []
     for entry in entries:
         performer = entry.song.performer
 
@@ -1429,6 +1473,7 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915
         performer_path = temp_dir / f"shorts_performer_{entry.position:02d}.png"
         performer_slide.save(performer_path)
         slides.append((performer_path, SHORTS_PERFORMER_DURATION))
+        performer_entries.append((performer_path, SHORTS_PERFORMER_DURATION, entry.song))
 
     # 3. Closing slide
     logger.info("Creating shorts closing slide...")
@@ -1444,23 +1489,70 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915
     video_clips = [ImageClip(str(path)).with_duration(duration) for path, duration in slides]
     final_video = concatenate_videoclips(video_clips, method="compose")
 
-    # Background music only — no narration TTS to keep runtime under 60s deterministically.
+    # Build audio: background music for intro/closing; per-performer song during each performer slide.
     background_music_path = (
         Path(settings.BASE_DIR) / "data" / "get-in-the-groove-psychedelic-grunge-instrumental-391304.mp3"
     )
-    if background_music_path.exists():
-        try:
-            logger.info(f"Adding background music: {background_music_path}")
-            background_music = AudioFileClip(str(background_music_path))
-            if background_music.duration < final_video.duration:
-                loops_needed = int(final_video.duration / background_music.duration) + 1
-                background_music = concatenate_audioclips([background_music] * loops_needed)
-            background_music = background_music.subclipped(0, final_video.duration)
-            background_music = background_music.with_volume_scaled(0.5)
-            background_music = background_music.with_effects([afx.AudioFadeOut(2.0)])
-            final_video = final_video.with_audio(background_music)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to add background music, continuing without it")
+    try:
+        audio_clips = []
+
+        # Helper: loop a clip to at least `target_duration` seconds
+        def _loop_to_duration(clip: AudioFileClip, target_duration: float) -> AudioFileClip:
+            if clip.duration < target_duration:
+                loops = int(target_duration / clip.duration) + 1
+                clip = concatenate_audioclips([clip] * loops)
+            return clip.subclipped(0, target_duration)
+
+        # Intro: background music at low volume
+        if background_music_path.exists():
+            bg_intro = AudioFileClip(str(background_music_path))
+            bg_intro = _loop_to_duration(bg_intro, SHORTS_INTRO_DURATION)
+            bg_intro = bg_intro.with_volume_scaled(0.4).with_start(0)
+            audio_clips.append(bg_intro)
+
+        # Performer slides: each gets their own song (fade in / fade out within the slide window)
+        performer_offset = SHORTS_INTRO_DURATION
+        for _slide_path, slide_duration, song in performer_entries:
+            song_path = download_performer_song_audio(song) if song else None
+            if song_path and song_path.exists():
+                try:
+                    perf_audio = AudioFileClip(str(song_path))
+                    perf_audio = _loop_to_duration(perf_audio, slide_duration)
+                    perf_audio = perf_audio.with_effects(
+                        [
+                            afx.AudioFadeIn(SHORTS_AUDIO_FADE_DURATION),
+                            afx.AudioFadeOut(SHORTS_AUDIO_FADE_DURATION),
+                        ]
+                    )
+                    audio_clips.append(perf_audio.with_start(performer_offset))
+                    logger.info(f"Added audio for {song.performer.name} at t={performer_offset:.1f}s")
+                except Exception:  # noqa: BLE001
+                    logger.exception(f"Failed to load audio for {song.performer.name}, skipping")
+            # Fallback: background music segment for this slide
+            elif background_music_path.exists():
+                try:
+                    bg_seg = AudioFileClip(str(background_music_path))
+                    bg_seg = _loop_to_duration(bg_seg, slide_duration)
+                    bg_seg = bg_seg.with_volume_scaled(0.4).with_start(performer_offset)
+                    audio_clips.append(bg_seg)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to add fallback background segment")
+            performer_offset += slide_duration
+
+        # Closing: background music with fade-out
+        if background_music_path.exists():
+            bg_closing = AudioFileClip(str(background_music_path))
+            bg_closing = _loop_to_duration(bg_closing, SHORTS_CLOSING_DURATION)
+            bg_closing = bg_closing.with_volume_scaled(0.4)
+            bg_closing = bg_closing.with_effects([afx.AudioFadeOut(SHORTS_CLOSING_DURATION * 0.8)])
+            audio_clips.append(bg_closing.with_start(performer_offset))
+
+        if audio_clips:
+            composite_audio = CompositeAudioClip(audio_clips)
+            final_video = final_video.with_audio(composite_audio)
+
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to build audio track, rendering without audio")
 
     video_dir = Path(settings.BASE_DIR) / "data" / "videos"
     video_dir.mkdir(parents=True, exist_ok=True)
