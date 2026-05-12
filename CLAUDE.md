@@ -126,9 +126,9 @@ All commands must be run from the `malcom/` directory: `cd malcom && uv run pyth
 | Command | Purpose | Key Options |
 |---------|---------|-------------|
 | `generate_weekly_playlist_introduction` | Generate AI narration for weekly video | `<playlist_id>`, `--audio`, `--voice` |
-| `generate_weekly_playlist_video` | Create weekly playlist video (auto-generates narration) | `<playlist_id>`, `--intro-text-file` |
+| `generate_weekly_playlist_video` | Create weekly playlist video (auto-generates narration) | `<playlist_id>`, `--intro-text-file`, `--format {standard,shorts}` |
 | `generate_playlist_introduction` | Generate AI narration for monthly video | `<target_month>` |
-| `generate_playlist_video` | Create monthly playlist video | `<target_month>` |
+| `generate_playlist_video` | Create monthly playlist video | `<target_month>`, `--format {standard,shorts}` |
 | `generate_tts_samples` | Generate TTS audio samples with different tunings | `--count`, `--text`, `--output-dir`, `--voice` |
 
 **Weekly video workflow:**

@@ -5,8 +5,11 @@ from pathlib import Path
 from commons.youtube_utils import insert_video_at_position, upload_video_to_youtube
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
-from houses.functions import generate_weekly_playlist_video
+from houses.functions import generate_weekly_playlist_video, generate_weekly_playlist_video_shorts
 from houses.models import WeeklyPlaylist
+
+VIDEO_FORMAT_STANDARD = "standard"
+VIDEO_FORMAT_SHORTS = "shorts"
 
 
 class Command(BaseCommand):
@@ -39,6 +42,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Bypass idempotency guards and re-render/re-upload/re-insert the intro video",
         )
+        parser.add_argument(
+            "--format",
+            choices=[VIDEO_FORMAT_STANDARD, VIDEO_FORMAT_SHORTS],
+            default=VIDEO_FORMAT_STANDARD,
+            dest="video_format",
+            help=(
+                "Output format: 'standard' for 1920x1080 long-form, "
+                "'shorts' for 1080x1920 9:16 ≤60s YouTube Shorts (no narration)"
+            ),
+        )
 
     def handle(self, *args, **options) -> None:  # noqa: ANN002, ANN003, C901, PLR0911, PLR0912, PLR0915
         """Generate and save playlist introduction video."""
@@ -47,6 +60,7 @@ class Command(BaseCommand):
         secrets_file = Path(options["secrets_file"])
         skip_update_playlist = options["skip_update_playlist"]
         force = options["force"]
+        video_format = options["video_format"]
 
         try:
             playlist = WeeklyPlaylist.objects.get(id=playlist_id)
@@ -56,6 +70,16 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Generating video for playlist: week of {playlist.date.strftime('%Y-%m-%d')}")
         self.stdout.write(f"Playlist URL: {playlist.youtube_playlist_url}")
+
+        if video_format == VIDEO_FORMAT_SHORTS:
+            self.stdout.write("Format: shorts (9:16, ≤60s, no narration)")
+            shorts_filepath = generate_weekly_playlist_video_shorts(playlist)
+            self.stdout.write(self.style.SUCCESS("\n=== Shorts Video Generated ===\n"))
+            self.stdout.write(f"Video saved to: {shorts_filepath}")
+            self.stdout.write(
+                "Upload manually to YouTube Shorts — the playlist intro upload flow is for long-form videos."
+            )
+            return
 
         # Idempotency branches — only relevant when we would otherwise upload/insert.
         if not skip_update_playlist and not force:

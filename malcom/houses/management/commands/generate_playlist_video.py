@@ -3,8 +3,11 @@
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandParser
-from houses.functions import generate_playlist_video
+from houses.functions import generate_playlist_video, generate_playlist_video_shorts
 from houses.models import MonthlyPlaylist
+
+VIDEO_FORMAT_STANDARD = "standard"
+VIDEO_FORMAT_SHORTS = "shorts"
 
 
 class Command(BaseCommand):
@@ -21,11 +24,22 @@ class Command(BaseCommand):
             type=str,
             help="Path to UTF-8 text file containing pre-written introduction text",
         )
+        parser.add_argument(
+            "--format",
+            choices=[VIDEO_FORMAT_STANDARD, VIDEO_FORMAT_SHORTS],
+            default=VIDEO_FORMAT_STANDARD,
+            dest="video_format",
+            help=(
+                "Output format: 'standard' for 1920x1080 long-form, "
+                "'shorts' for 1080x1920 9:16 ≤60s YouTube Shorts (no narration)"
+            ),
+        )
 
     def handle(self, *args, **options) -> None:  # noqa: ANN002, ANN003
         """Generate and save playlist introduction video."""
         playlist_id = options["playlist_id"]
         intro_text_file = options.get("intro_text_file")
+        video_format = options["video_format"]
 
         try:
             playlist = MonthlyPlaylist.objects.get(id=playlist_id)
@@ -35,6 +49,13 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Generating video for playlist: {playlist.date.strftime('%B %Y')}")
         self.stdout.write(f"Playlist URL: {playlist.youtube_playlist_url}")
+
+        if video_format == VIDEO_FORMAT_SHORTS:
+            self.stdout.write("Format: shorts (9:16, ≤60s, no narration)")
+            shorts_filepath = generate_playlist_video_shorts(playlist)
+            self.stdout.write(self.style.SUCCESS("\n=== Shorts Video Generated ===\n"))
+            self.stdout.write(f"Video saved to: {shorts_filepath}")
+            return
 
         # Load introduction text from file if provided
         intro_text = None
