@@ -16,12 +16,16 @@ from django.test import TestCase
 from PIL import Image
 
 from houses.functions import (
+    render_shorts_closing_slide,
+    render_shorts_intro_slide,
+    render_shorts_performer_slide,
     render_video_closing_slide,
     render_video_intro_slide,
     render_video_performer_slide,
 )
 
 VIDEO_SIZE = (1920, 1080)
+SHORTS_SIZE = (1080, 1920)
 
 
 class TestRenderVideoIntroSlide(TestCase):
@@ -118,6 +122,63 @@ class TestRenderVideoClosingSlide(TestCase):
             channel_url="https://www.youtube.com/@hakkoakkei",
         )
         self.assertEqual(img.size, VIDEO_SIZE)
+
+
+class TestRenderShortsIntroSlide(TestCase):
+    def test_shorts_intro_with_full_lineup(self) -> None:
+        lineup = [
+            (1, "残響のリフレイン", True),
+            (2, "OGRE YOU ASSHOLE", False),
+            (3, "tricot", False),
+            (4, "Mass of the Fermenting Dregs", False),
+            (5, "envy", True),
+            (6, "toe", False),
+        ]
+        img = render_shorts_intro_slide(title_label="Week of 2026-04-13", lineup=lineup)
+        self.assertIsInstance(img, Image.Image)
+        self.assertEqual(img.size, SHORTS_SIZE)
+
+    def test_shorts_intro_with_empty_lineup(self) -> None:
+        img = render_shorts_intro_slide(title_label="April 2026", lineup=[])
+        self.assertEqual(img.size, SHORTS_SIZE)
+
+    def test_shorts_intro_caps_long_lineup(self) -> None:
+        oversized_lineup = [(i, f"Performer {i}", False) for i in range(1, 30)]
+        img = render_shorts_intro_slide(title_label="Big Month", lineup=oversized_lineup)
+        self.assertEqual(img.size, SHORTS_SIZE)
+
+
+class TestRenderShortsPerformerSlide(TestCase):
+    def test_shorts_performer_with_all_fields(self) -> None:
+        img = render_shorts_performer_slide(
+            position=3,
+            performer=_stub_performer(),
+            song_title="Crimson Tide",
+            venue_name="下北沢SHELTER",
+            performance_date=date(2026, 4, 15),
+            artist_url="https://example.com/artist",
+        )
+        self.assertEqual(img.size, SHORTS_SIZE)
+
+    def test_shorts_performer_with_no_qr_target(self) -> None:
+        img = render_shorts_performer_slide(
+            position=1,
+            performer=_stub_performer(),
+            song_title="",
+            venue_name=None,
+            performance_date=None,
+            artist_url=None,
+        )
+        self.assertEqual(img.size, SHORTS_SIZE)
+
+
+class TestRenderShortsClosingSlide(TestCase):
+    def test_shorts_closing_renders(self) -> None:
+        img = render_shorts_closing_slide(
+            closing_text="See you next week",
+            channel_url="https://www.youtube.com/@hakkoakkei",
+        )
+        self.assertEqual(img.size, SHORTS_SIZE)
 
 
 class TestBrandWashCanvasNoGrain(TestCase):

@@ -50,6 +50,7 @@ SP_XXL = 144
 # --- Canvas sizes ---
 INSTAGRAM_SQUARE = (1080, 1080)
 VIDEO_WIDESCREEN = (1920, 1080)
+VIDEO_SHORTS = (1080, 1920)  # 9:16 vertical, for YouTube Shorts
 
 # --- Fonts ---
 _FONTS_DIR = Path(__file__).resolve().parent / "fonts"

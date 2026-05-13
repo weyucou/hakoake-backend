@@ -77,6 +77,7 @@ consistent across the two pipelines.
 |----------|------|-----|
 | `INSTAGRAM_SQUARE` | `(1080, 1080)` | All carousel slides. |
 | `VIDEO_WIDESCREEN` | `(1920, 1080)` | Playlist video slides. |
+| `VIDEO_SHORTS` | `(1080, 1920)` | YouTube Shorts slides (9:16 vertical). |
 
 ## Layout helpers
 
@@ -124,6 +125,24 @@ In `malcom/houses/functions.py`:
 The video generator (`_generate_playlist_video`) uses **hard cuts** between
 slides — the previous glitch/RGB-shift transitions were retired with this
 design pass. They fought the warm analog idiom.
+
+### YouTube Shorts (1080×1920)
+
+In `malcom/houses/functions.py`:
+
+| Function | Purpose |
+|----------|---------|
+| `render_shorts_intro_slide` | Vertical editorial header + stacked single-column numbered lineup (vermillion numerals + cream names, ★ for spotlights). Corner wordmark bottom-left. |
+| `render_shorts_performer_slide` | Top: oversized vermillion position numeral. Middle: display-serif name + romaji + song title + venue/date. Bottom: single centered cream QR card (artist link). |
+| `render_shorts_closing_slide` | Centered display-serif closing message stacked above a cream YouTube channel QR card. |
+
+The Shorts coordinator (`_generate_playlist_video_shorts`) holds the runtime
+under 60s by capping performer slides and using shorter fixed per-slide
+durations (intro 3s, performer 4s, closing 3s — the ≤60s budget supports
+up to 12 performer slides). Audio is background music only — the
+long-form narration TTS is intentionally skipped because Shorts pacing
+will not let a multi-minute voiceover fit. The video is rendered at 30fps
+with H.264 + AAC, the standard codecs accepted by YouTube Shorts uploads.
 
 ## Adding a new slide
 

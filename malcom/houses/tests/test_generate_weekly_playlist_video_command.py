@@ -201,6 +201,35 @@ class TestGenerateWeeklyPlaylistVideoCommand(TestCase):
 
     @patch("houses.management.commands.generate_weekly_playlist_video.insert_video_at_position")
     @patch("houses.management.commands.generate_weekly_playlist_video.upload_video_to_youtube")
+    @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video_shorts")
+    @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video")
+    def test_format_shorts_invokes_shorts_generator_and_skips_upload(
+        self,
+        mock_standard_gen: MagicMock,
+        mock_shorts_gen: MagicMock,
+        mock_upload: MagicMock,
+        mock_insert: MagicMock,
+    ) -> None:
+        """AC: --format shorts routes to the shorts generator and never uploads/inserts."""
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp_video:
+            mock_shorts_gen.return_value = Path(tmp_video.name)
+            call_command(
+                "generate_weekly_playlist_video",
+                str(self.playlist.id),
+                format="shorts",
+            )
+
+        mock_shorts_gen.assert_called_once_with(self.playlist)
+        mock_standard_gen.assert_not_called()
+        mock_upload.assert_not_called()
+        mock_insert.assert_not_called()
+
+        self.playlist.refresh_from_db()
+        self.assertEqual(self.playlist.intro_youtube_video_id, "")
+        self.assertIsNone(self.playlist.intro_video_inserted_datetime)
+
+    @patch("houses.management.commands.generate_weekly_playlist_video.insert_video_at_position")
+    @patch("houses.management.commands.generate_weekly_playlist_video.upload_video_to_youtube")
     @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video")
     def test_intro_video_id_persisted_before_insert(
         self, mock_gen: MagicMock, mock_upload: MagicMock, mock_insert: MagicMock

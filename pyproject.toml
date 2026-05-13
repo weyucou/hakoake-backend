@@ -38,6 +38,7 @@ dependencies = [
     "qrcode>=8.2",
     "requests>=2.32.4",
     "whitenoise<7.0",
+    "yt-dlp>=2026.3.17",
     "zappa<0.60",
 ]
 

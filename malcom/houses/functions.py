@@ -22,6 +22,7 @@ from commons.design import (
     SP_MD,
     SP_SM,
     SP_XL,
+    VIDEO_SHORTS,
     VIDEO_WIDESCREEN,
     body_font,
     brand_wash_canvas,
@@ -37,7 +38,7 @@ from django.db.models import Count
 from django.utils import timezone
 from moviepy import AudioFileClip, CompositeAudioClip, ImageClip, concatenate_audioclips, concatenate_videoclips
 from moviepy.audio import fx as afx
-from performers.models import Performer, PerformerSocialLink
+from performers.models import Performer, PerformerSocialLink, PerformerSong
 from PIL import Image, ImageDraw
 from pydub import AudioSegment
 from pydub.generators import WhiteNoise
@@ -825,6 +826,260 @@ def render_video_closing_slide(closing_text: str, channel_url: str) -> Image.Ima
     return canvas
 
 
+SHORTS_MAX_PERFORMERS = 12
+SHORTS_INTRO_DURATION = 3.0
+SHORTS_PERFORMER_DURATION = 4.0
+SHORTS_CLOSING_DURATION = 3.0
+SHORTS_MAX_TOTAL_DURATION = 60.0
+SHORTS_AUDIO_FADE_DURATION = 0.5
+PERFORMER_SAMPLES_DIR = "performer_samples"
+
+
+def download_performer_song_audio(song: PerformerSong, *, force: bool = False) -> Path | None:
+    """Download audio from a performer's YouTube song, caching to data/performer_samples/<song_id>.mp3.
+
+    Returns the cached path, or None if the song has no YouTube URL or download fails.
+    """
+    if not song.youtube_url:
+        return None
+
+    import yt_dlp  # noqa: PLC0415
+
+    samples_dir = Path(settings.BASE_DIR) / "data" / PERFORMER_SAMPLES_DIR
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    output_path = samples_dir / f"{song.id}.mp3"
+
+    if output_path.exists() and not force:
+        return output_path
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+        "outtmpl": str(samples_dir / f"{song.id}.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([song.youtube_url])
+        if output_path.exists():
+            logger.info(f"Downloaded audio for {song.performer.name}: {output_path}")
+            return output_path
+    except Exception:  # noqa: BLE001
+        logger.exception(f"Failed to download audio for song id={song.id} ({song.youtube_url})")
+    return None
+
+
+def render_shorts_intro_slide(
+    title_label: str,
+    lineup: list[tuple[int, str, bool]],
+) -> Image.Image:
+    """Render the opening slide of a YouTube Shorts playlist video (9:16, 1080×1920).
+
+    Layout:
+      - Top stack: editorial label + display-serif title + period
+      - Stacked numbered lineup (single column), vermillion numerals + cream names
+      - Spotlighted performers get a small ★ marker
+      - Corner wordmark bottom-left
+    """
+    canvas = brand_wash_canvas(VIDEO_SHORTS)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_SHORTS
+
+    label_font = body_font(28, bold=True)
+    draw.text((SP_LG, SP_LG), "HAKKO-AKKEI // TOKYO LIVE HOUSES", font=label_font, fill=INK_GRAY)
+
+    title_font = display_font(96)
+    draw.text((SP_LG, SP_LG + 48), title_label, font=title_font, fill=AGED_CREAM)
+
+    # Top-N stacked lineup
+    list_top = 280
+    list_bottom = video_h - 180
+    list_h = list_bottom - list_top
+    entries = lineup[:SHORTS_MAX_PERFORMERS]
+    if entries:
+        line_h = list_h // len(entries)
+        line_h = max(64, min(line_h, 110))
+        num_font = display_font(int(line_h * 0.78))
+        name_font = display_font(int(line_h * 0.5))
+        max_name_w = video_w - SP_LG * 2 - 130
+
+        for i, (pos, name, spotlight) in enumerate(entries):
+            y = list_top + i * line_h
+            draw.text(
+                (SP_LG, y + line_h // 2),
+                f"{pos:02d}",
+                font=num_font,
+                fill=FLYER_RED,
+                anchor="lm",
+            )
+            display_name = name + (" ★" if spotlight else "")
+            lines = wrap_text(draw, display_name, name_font, max_name_w)
+            if lines:
+                draw.text(
+                    (SP_LG + 130, y + line_h // 2),
+                    lines[0],
+                    font=name_font,
+                    fill=AGED_CREAM,
+                    anchor="lm",
+                )
+
+    draw_corner_wordmark(draw, (SP_LG, video_h - SP_LG), anchor="lb", color=INK_GRAY, size=20)
+    return canvas
+
+
+def render_shorts_performer_slide(  # noqa: PLR0913
+    position: int,
+    performer: Performer,
+    song_title: str,
+    venue_name: str | None,
+    performance_date: dt.date | None,
+    artist_url: str | None,
+) -> Image.Image:
+    """Render a single performer slide for a Shorts playlist video.
+
+    Layout (1080×1920):
+      - Top section: oversized vermillion position numeral
+      - Middle section: display-serif performer name + romaji subtitle + song title
+      - Lower-middle section: venue + date metadata
+      - Bottom QR card (artist link only — single QR fits the punchy Shorts pacing)
+      - Corner wordmark
+    """
+    canvas = brand_wash_canvas(VIDEO_SHORTS)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_SHORTS
+
+    label_font = body_font(26, bold=True)
+    draw.text((SP_LG, SP_LG), "PERFORMER // NOW PLAYING", font=label_font, fill=INK_GRAY)
+
+    numeral_font = display_font(360)
+    draw.text((SP_LG, SP_LG + 30), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
+
+    text_left = SP_LG
+    text_max_w = video_w - SP_LG * 2
+    cursor_y = SP_LG + 420
+
+    name_font = display_font(96)
+    name_lines = wrap_text(draw, performer.name, name_font, text_max_w)
+    for line in name_lines[:2]:
+        draw.text((text_left, cursor_y), line, font=name_font, fill=AGED_CREAM, anchor="lt")
+        cursor_y += 104
+
+    if performer.name_romaji and performer.name_romaji.lower() != performer.name.lower():
+        romaji_font = body_font(36)
+        draw.text((text_left, cursor_y), performer.name_romaji, font=romaji_font, fill=INK_GRAY, anchor="lt")
+        cursor_y += 48
+
+    if song_title:
+        song_font = body_font(32)
+        draw.text((text_left, cursor_y + SP_SM), f'"{song_title}"', font=song_font, fill=AGED_CREAM, anchor="lt")
+        cursor_y += SP_SM + 42
+
+    if performance_date:
+        date_font = body_font(32, bold=True)
+        draw.text(
+            (text_left, cursor_y + SP_MD),
+            performance_date.strftime("%a %b %d, %Y").upper(),
+            font=date_font,
+            fill=FLYER_RED,
+            anchor="lt",
+        )
+        cursor_y += SP_MD + 42
+
+    if venue_name:
+        venue_font = body_font(32, bold=True)
+        venue_lines = wrap_text(draw, venue_name, venue_font, text_max_w)
+        for line in venue_lines[:2]:
+            draw.text((text_left, cursor_y), line, font=venue_font, fill=AGED_CREAM, anchor="lt")
+            cursor_y += 42
+
+    if artist_url:
+        card_size = 380
+        card_x = (video_w - card_size) // 2
+        card_y = video_h - card_size - SP_XL
+        canvas_rgba = canvas.convert("RGBA")
+        panel = Image.new("RGBA", (card_size, card_size), AGED_CREAM_PANEL)
+        canvas_rgba.alpha_composite(panel, (card_x, card_y))
+        canvas = canvas_rgba.convert("RGB")
+        draw = ImageDraw.Draw(canvas)
+
+        inner = card_size - 2 * SP_MD - 36
+        qr_img = build_qr_code(artist_url, inner)
+        canvas.paste(qr_img, (card_x + (card_size - inner) // 2, card_y + SP_MD))
+
+        qr_label_font = body_font(22, bold=True)
+        draw.text(
+            (card_x + card_size // 2, card_y + card_size - SP_MD),
+            "ARTIST",
+            font=qr_label_font,
+            fill=PAPER_BLACK,
+            anchor="mb",
+        )
+
+    draw_corner_wordmark(draw, (SP_LG, video_h - SP_LG), anchor="lb", color=INK_GRAY, size=20)
+    return canvas
+
+
+def render_shorts_closing_slide(closing_text: str, channel_url: str) -> Image.Image:
+    """Render the closing slide of a Shorts playlist video.
+
+    Layout (1080×1920): centered display-serif message stacked above a cream
+    QR card linking the YouTube channel.
+    """
+    canvas = brand_wash_canvas(VIDEO_SHORTS)
+    draw = ImageDraw.Draw(canvas)
+    video_w, video_h = VIDEO_SHORTS
+
+    label_font = body_font(28, bold=True)
+    draw.text((video_w // 2, SP_LG), "HAKKO-AKKEI // SUBSCRIBE", font=label_font, fill=INK_GRAY, anchor="mt")
+
+    closing_font = display_font(108)
+    closing_lines = wrap_text(draw, closing_text, closing_font, video_w - 2 * SP_LG)
+    msg_top = 280
+    for line in closing_lines[:3]:
+        draw.text((video_w // 2, msg_top), line, font=closing_font, fill=AGED_CREAM, anchor="mt")
+        msg_top += 124
+
+    follow_font = body_font(34, bold=True)
+    draw.text(
+        (video_w // 2, msg_top + SP_MD),
+        "Follow @hakkoakkei",
+        font=follow_font,
+        fill=FLYER_RED,
+        anchor="mt",
+    )
+
+    card_size = 460
+    card_x = (video_w - card_size) // 2
+    card_y = video_h - card_size - SP_XL
+    canvas_rgba = canvas.convert("RGBA")
+    panel = Image.new("RGBA", (card_size, card_size), AGED_CREAM_PANEL)
+    canvas_rgba.alpha_composite(panel, (card_x, card_y))
+    canvas = canvas_rgba.convert("RGB")
+    draw = ImageDraw.Draw(canvas)
+
+    qr_inner = card_size - 2 * SP_MD - 36
+    qr_img = build_qr_code(channel_url, qr_inner)
+    canvas.paste(qr_img, (card_x + (card_size - qr_inner) // 2, card_y + SP_MD))
+
+    qr_label_font = body_font(22, bold=True)
+    draw.text(
+        (card_x + card_size // 2, card_y + card_size - SP_MD),
+        "YOUTUBE CHANNEL",
+        font=qr_label_font,
+        fill=PAPER_BLACK,
+        anchor="mb",
+    )
+
+    return canvas
+
+
 def _generate_playlist_video(  # noqa: C901, PLR0915, PLR0912
     playlist: MonthlyPlaylist | WeeklyPlaylist,
     intro_text_func: Callable,
@@ -1142,4 +1397,212 @@ def generate_weekly_playlist_video(playlist: WeeklyPlaylist, intro_text: str | N
         filename_prefix="playlist_intro_week_",
         timestamp_format="%Y%m%d",
         intro_text=intro_text,
+    )
+
+
+def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901
+    playlist: MonthlyPlaylist | WeeklyPlaylist,
+    entry_set_name: str,
+    date_start: dt.date,
+    date_end: dt.date,
+    title_label: str,
+    closing_text: str,
+    filename_prefix: str,
+    timestamp_format: str,
+    max_performers: int = SHORTS_MAX_PERFORMERS,
+) -> Path:
+    """Generate a vertical 9:16 YouTube Shorts video (≤60s) from a playlist.
+
+    Shorts pacing keeps the runtime under 60s by capping the number of
+    performer slides and using shorter fixed durations per slide. Audio is
+    background music only — narration is the long-form video's job.
+    """
+    temp_dir = Path(tempfile.mkdtemp())
+    logger.info(f"Created temp directory: {temp_dir}")
+
+    entry_set = getattr(playlist, entry_set_name).select_related("song__performer")
+    all_entries = list(entry_set.order_by("position"))
+
+    # Budget: leave room for intro + closing inside SHORTS_MAX_TOTAL_DURATION.
+    budget = SHORTS_MAX_TOTAL_DURATION - SHORTS_INTRO_DURATION - SHORTS_CLOSING_DURATION
+    capacity_by_duration = int(budget // SHORTS_PERFORMER_DURATION)
+    cap = max(1, min(max_performers, capacity_by_duration))
+    entries = all_entries[:cap]
+    if len(all_entries) > cap:
+        logger.info(f"Shorts: capping performer slides at {cap} of {len(all_entries)} to fit 60s budget")
+
+    slides: list[tuple[Path, float]] = []
+
+    # 1. Intro slide
+    logger.info("Creating shorts intro slide...")
+    intro_lineup: list[tuple[int, str, bool]] = [
+        (entry.position, entry.song.performer.name, entry.is_spotlight) for entry in entries
+    ]
+    intro_slide = render_shorts_intro_slide(title_label=title_label, lineup=intro_lineup)
+    intro_path = temp_dir / "shorts_intro.png"
+    intro_slide.save(intro_path)
+    slides.append((intro_path, SHORTS_INTRO_DURATION))
+
+    # 2. Performer slides — collect (path, duration, song) so we can build per-performer audio
+    logger.info(f"Creating {len(entries)} shorts performer slides...")
+    performer_entries: list[tuple[Path, float, PerformerSong | None]] = []
+    for entry in entries:
+        performer = entry.song.performer
+
+        performance = (
+            PerformanceSchedule.objects.filter(
+                performers=performer,
+                performance_date__gte=date_start,
+                performance_date__lt=date_end,
+            )
+            .select_related("live_house", "live_house__website")
+            .first()
+        )
+        artist_url = performer.website if performer.website else entry.song.youtube_url
+        venue_name = performance.live_house.name if performance else None
+        perf_date = performance.performance_date if performance else None
+
+        performer_slide = render_shorts_performer_slide(
+            position=entry.position,
+            performer=performer,
+            song_title=entry.song.title or "",
+            venue_name=venue_name,
+            performance_date=perf_date,
+            artist_url=artist_url,
+        )
+        performer_path = temp_dir / f"shorts_performer_{entry.position:02d}.png"
+        performer_slide.save(performer_path)
+        slides.append((performer_path, SHORTS_PERFORMER_DURATION))
+        performer_entries.append((performer_path, SHORTS_PERFORMER_DURATION, entry.song))
+
+    # 3. Closing slide
+    logger.info("Creating shorts closing slide...")
+    closing_slide = render_shorts_closing_slide(
+        closing_text=closing_text,
+        channel_url="https://www.youtube.com/@hakkoakkei",
+    )
+    closing_path = temp_dir / "shorts_closing.png"
+    closing_slide.save(closing_path)
+    slides.append((closing_path, SHORTS_CLOSING_DURATION))
+
+    # Compose video clips (hard cuts, vertical canvas already baked into the PNGs)
+    video_clips = [ImageClip(str(path)).with_duration(duration) for path, duration in slides]
+    final_video = concatenate_videoclips(video_clips, method="compose")
+
+    # Build audio: background music for intro/closing; per-performer song during each performer slide.
+    background_music_path = (
+        Path(settings.BASE_DIR) / "data" / "get-in-the-groove-psychedelic-grunge-instrumental-391304.mp3"
+    )
+    try:
+        audio_clips = []
+
+        # Helper: loop a clip to at least `target_duration` seconds
+        def _loop_to_duration(clip: AudioFileClip, target_duration: float) -> AudioFileClip:
+            if clip.duration < target_duration:
+                loops = int(target_duration / clip.duration) + 1
+                clip = concatenate_audioclips([clip] * loops)
+            return clip.subclipped(0, target_duration)
+
+        # Intro: background music at low volume
+        if background_music_path.exists():
+            bg_intro = AudioFileClip(str(background_music_path))
+            bg_intro = _loop_to_duration(bg_intro, SHORTS_INTRO_DURATION)
+            bg_intro = bg_intro.with_volume_scaled(0.4).with_start(0)
+            audio_clips.append(bg_intro)
+
+        # Performer slides: each gets their own song (fade in / fade out within the slide window)
+        performer_offset = SHORTS_INTRO_DURATION
+        for _slide_path, slide_duration, song in performer_entries:
+            song_path = download_performer_song_audio(song) if song else None
+            if song_path and song_path.exists():
+                try:
+                    perf_audio = AudioFileClip(str(song_path))
+                    perf_audio = _loop_to_duration(perf_audio, slide_duration)
+                    perf_audio = perf_audio.with_effects(
+                        [
+                            afx.AudioFadeIn(SHORTS_AUDIO_FADE_DURATION),
+                            afx.AudioFadeOut(SHORTS_AUDIO_FADE_DURATION),
+                        ]
+                    )
+                    audio_clips.append(perf_audio.with_start(performer_offset))
+                    logger.info(f"Added audio for {song.performer.name} at t={performer_offset:.1f}s")
+                except Exception:  # noqa: BLE001
+                    logger.exception(f"Failed to load audio for {song.performer.name}, skipping")
+            # Fallback: background music segment for this slide
+            elif background_music_path.exists():
+                try:
+                    bg_seg = AudioFileClip(str(background_music_path))
+                    bg_seg = _loop_to_duration(bg_seg, slide_duration)
+                    bg_seg = bg_seg.with_volume_scaled(0.4).with_start(performer_offset)
+                    audio_clips.append(bg_seg)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to add fallback background segment")
+            performer_offset += slide_duration
+
+        # Closing: background music with fade-out
+        if background_music_path.exists():
+            bg_closing = AudioFileClip(str(background_music_path))
+            bg_closing = _loop_to_duration(bg_closing, SHORTS_CLOSING_DURATION)
+            bg_closing = bg_closing.with_volume_scaled(0.4)
+            bg_closing = bg_closing.with_effects([afx.AudioFadeOut(SHORTS_CLOSING_DURATION * 0.8)])
+            audio_clips.append(bg_closing.with_start(performer_offset))
+
+        if audio_clips:
+            composite_audio = CompositeAudioClip(audio_clips)
+            final_video = final_video.with_audio(composite_audio)
+
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to build audio track, rendering without audio")
+
+    video_dir = Path(settings.BASE_DIR) / "data" / "videos"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = playlist.date.strftime(timestamp_format)
+    video_filename = f"{filename_prefix}{timestamp}.mp4"
+    video_filepath = video_dir / video_filename
+
+    logger.info(f"Rendering shorts video to {video_filepath} (duration={final_video.duration:.1f}s)...")
+    final_video.write_videofile(
+        str(video_filepath),
+        fps=30,
+        codec="libx264",
+        audio_codec="aac",
+        temp_audiofile=str(temp_dir / "temp_audio.m4a"),
+        remove_temp=True,
+    )
+    logger.info(f"Shorts video generation complete: {video_filepath}")
+    return video_filepath
+
+
+def generate_playlist_video_shorts(playlist: MonthlyPlaylist, max_performers: int = SHORTS_MAX_PERFORMERS) -> Path:
+    """Generate a YouTube Shorts (9:16, ≤60s) video for a monthly playlist."""
+    month_start = playlist.date
+    return _generate_playlist_video_shorts(
+        playlist=playlist,
+        entry_set_name="monthlyplaylistentry_set",
+        date_start=month_start,
+        date_end=get_month_end(month_start),
+        title_label=playlist.date.strftime("%B %Y"),
+        closing_text="See You Next Month!",
+        filename_prefix="playlist_shorts_",
+        timestamp_format="%Y%m",
+        max_performers=max_performers,
+    )
+
+
+def generate_weekly_playlist_video_shorts(
+    playlist: WeeklyPlaylist,
+    max_performers: int = SHORTS_MAX_PERFORMERS,
+) -> Path:
+    """Generate a YouTube Shorts (9:16, ≤60s) video for a weekly playlist."""
+    week_start = playlist.date
+    return _generate_playlist_video_shorts(
+        playlist=playlist,
+        entry_set_name="weeklyplaylistentry_set",
+        date_start=week_start,
+        date_end=week_start + timezone.timedelta(days=7),
+        title_label=f"Week of {playlist.date.strftime('%Y-%m-%d')}",
+        closing_text="See You Next Week!",
+        filename_prefix="playlist_shorts_week_",
+        timestamp_format="%Y%m%d",
+        max_performers=max_performers,
     )
