@@ -243,4 +243,9 @@ malcom/staticfiles/*
 
 # Backups and session files
 *.bak
+.claude/worktrees/
 CHECKPOINT.md
+
+# Instagram/Threads OAuth token files (contain live access tokens)
+instagram_token.json
+threads_token.json
