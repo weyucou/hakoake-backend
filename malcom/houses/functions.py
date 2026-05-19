@@ -461,6 +461,9 @@ def _generate_introduction_text(  # noqa: C901, PLR0912, PLR0915
         .values_list("song__performer", "count")
     )
 
+    playlist_entries = list(getattr(playlist, entry_set_name).select_related("song__performer").order_by("position"))
+    entry_count = len(playlist_entries)
+
     user_query = [
         f"For {period_label} write an introduction to selected artists below, describing where and when they will play."
         "ALWAYS mention the date and day of the week when introduction where/when the artists play."
@@ -474,11 +477,13 @@ def _generate_introduction_text(  # noqa: C901, PLR0912, PLR0915
         "The text generated here is for a slide presentation voice-over.\n"
         "Clearly separate the START/EACH PERFORMER/END text, so they can be "
         "properly applied to the appropriate slide.\n"
+        f"IMPORTANT: This playlist has exactly {entry_count} selected artists. "
+        "Always state this exact number when referring to the total count of artists.\n"
         "Selected Artists/Performers (appear in the order they appear in the playlist):\n"
     ]
 
     playlist_entry_data = []
-    for entry in getattr(playlist, entry_set_name).select_related("song__performer").order_by("position"):
+    for entry in playlist_entries:
         entry_data = [
             f"{entry.position}. Artist: {entry.song.performer.name}\n",
             f"\t- name kana: {entry.song.performer.name_kana}\n",
