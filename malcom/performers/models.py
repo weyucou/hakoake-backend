@@ -80,27 +80,33 @@ class Performer(TimestampedModel):
 
     def has_valid_online_presence(self):
         """Check if performer has valid social media or unique website presence."""
+        valid_social_platforms = {
+            "twitter",
+            "instagram",
+            "facebook",
+            "youtube",
+            "bandcamp",
+            "soundcloud",
+            "spotify",
+            "apple_music",
+            "tiktok",
+            "discord",
+            "twitch",
+            "reddit",
+            "linkedin",
+            "vimeo",
+            "github",
+            "patreon",
+            "mastodon",
+        }
+
+        # Check pending social links buffered during pre-save validation
+        for link in getattr(self, "_pending_social_links", []):
+            if link.get("platform", "").lower() in valid_social_platforms and link.get("url"):
+                return True
+
         # Check for social media links (only if performer is saved to database)
         if self.pk and hasattr(self, "social_links") and self.social_links.exists():
-            valid_social_platforms = [
-                "twitter",
-                "instagram",
-                "facebook",
-                "youtube",
-                "bandcamp",
-                "soundcloud",
-                "spotify",
-                "apple_music",
-                "tiktok",
-                "discord",
-                "twitch",
-                "reddit",
-                "linkedin",
-                "vimeo",
-                "github",
-                "patreon",
-                "mastodon",
-            ]
             for link in self.social_links.all():
                 if link.platform.lower() in valid_social_platforms and link.url:
                     return True

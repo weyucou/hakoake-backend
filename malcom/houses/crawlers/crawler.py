@@ -515,6 +515,21 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
                     )
                     if created:
                         logger.info(f"✅ Created performer in database: {existing_performer.name}")
+                        # Flush buffered social links now that the performer has a PK
+                        pending = getattr(performer, "_pending_social_links", [])
+                        for link_info in pending:
+                            _, link_created = PerformerSocialLink.objects.get_or_create(
+                                performer=existing_performer,
+                                platform=link_info["platform"],
+                                defaults={
+                                    "platform_id": link_info.get("platform_id", ""),
+                                    "url": link_info.get("url", ""),
+                                },
+                            )
+                            if link_created:
+                                logger.debug(
+                                    f"Flushed pending {link_info['platform']} link for {existing_performer.name}"
+                                )
                     else:
                         logger.info(
                             f"ℹ️ Using existing performer with same romaji: {existing_performer.name} "
@@ -1308,13 +1323,23 @@ class LiveHouseWebsiteCrawler(ABC):  # noqa: B024
         Note: YouTube links are skipped here as they are populated more accurately
         from youtube_search.search_and_create_performer_songs() which extracts
         the channel ID directly from YouTube's data.
-        """
-        try:
-            for link_info in social_links:
-                # Skip YouTube links - these are handled by youtube_search module
-                if link_info["platform"] == "youtube":
-                    continue
 
+        When the performer has not yet been saved (pk is None), links are buffered
+        in performer._pending_social_links and applied after the DB record is created
+        by _save_and_link_performers.
+        """
+        non_youtube = [link for link in social_links if link.get("platform") != "youtube"]
+
+        if performer.pk is None:
+            # Buffer for post-save application — cannot write FK rows without a PK
+            if not hasattr(performer, "_pending_social_links"):
+                performer._pending_social_links = []
+            performer._pending_social_links.extend(non_youtube)
+            logger.debug(f"Buffered {len(non_youtube)} social links for unsaved performer {performer.name}")
+            return
+
+        try:
+            for link_info in non_youtube:
                 _, created = PerformerSocialLink.objects.get_or_create(
                     performer=performer,
                     platform=link_info["platform"],
