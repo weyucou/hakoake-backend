@@ -15,12 +15,12 @@ class FeverPopoCrawler(LiveHouseWebsiteCrawler):
     """
     Crawler for 新代田FEVER (LIVE HOUSE FEVER) website.
 
-    Schedule page structure:
-    - <h3>YY.MM.DD (Day) Event Title</h3>
+    Schedule page structure (as of 2026-05):
+    - <h2 class="eventtitle">YY.MM.DD (Day) Event Title</h2>
     - <p><img src="...flyer..."></p>
-    - <h4>Performer1<br>Performer2<br>...</h4>
-    - <p>OPEN HH:MM / START HH:MM</p>
-    - <p>ADV ¥XXXX / DOOR ¥XXXX</p>
+    - <h3><p>Performer1<br>Performer2</p></h3>
+    - <div>OPEN HH:MM / START HH:MM</div>
+    - <div><p>ADV ¥XXXX / DOOR ¥XXXX</p></div>
     """
 
     def extract_live_house_info(self, html_content: str) -> dict[str, str]:
@@ -42,21 +42,24 @@ class FeverPopoCrawler(LiveHouseWebsiteCrawler):
         """
         Extract performance schedules from FEVER schedule page.
 
-        Each event begins with an <h3> containing the date and event name,
-        followed by an optional flyer image, an <h4> of performers, and
-        <p> tags for times and ticket details.
+        Current structure (as of 2026-05):
+        - <h2 class="eventtitle">YY.MM.DD (Day) Event Title</h2>  [date + event name]
+        - <p><img ...></p>                                          [flyer image]
+        - <h3><p>Performer1<br>Performer2</p></h3>                 [performers]
+        - <div>OPEN HH:MM / START HH:MM</div>                     [times]
+        - <div><p>ADV ¥XXXX / DOOR ¥XXXX</p></div>                [ticket info]
         """
         soup = self.create_soup(html_content)
         schedules = []
 
-        h3_elements = soup.find_all("h3")
-        logger.debug(f"Found {len(h3_elements)} H3 event headers on FEVER schedule page")
+        h2_elements = soup.find_all("h2", class_="eventtitle")
+        logger.debug(f"Found {len(h2_elements)} H2 eventtitle headers on FEVER schedule page")
 
-        for h3 in h3_elements:
-            h3_text = h3.get_text(strip=True)
+        for h2 in h2_elements:
+            h2_text = h2.get_text(separator=" ", strip=True)
 
-            # Date format: YY.MM.DD (Day) Event Name  e.g. "26.04.01 (Wed) Event Title"
-            date_match = re.match(r"(\d{2})\.(\d{2})\.(\d{2})\s*\([^)]+\)\s*(.*)", h3_text)
+            # Date format: YY.MM.DD (Day) Event Name  e.g. "26.05.01 (Fri) Event Title"
+            date_match = re.match(r"(\d{2})\.(\d{2})\.(\d{2})\s*\([^)]+\)\s*(.*)", h2_text)
             if not date_match:
                 continue
 
@@ -72,37 +75,40 @@ class FeverPopoCrawler(LiveHouseWebsiteCrawler):
             open_time = "18:30"
             start_time = "19:00"
             event_image_url: str | None = None
-            context_parts = [h3_text]
+            context_parts = [h2_text]
 
-            # Collect sibling elements until the next event's <h3>
-            sibling = h3.find_next_sibling()
-            while sibling and sibling.name != "h3":
-                if sibling.name == "p":
-                    img = sibling.find("img", src=True)
-                    if img and not event_image_url:
-                        event_image_url = img["src"]
+            # Walk into the asset-content block that follows this header
+            asset_header = h2.find_parent(class_="asset-header")
+            if asset_header:
+                asset_content = asset_header.find_next_sibling(class_="asset-content")
+            else:
+                asset_content = None
 
-                    p_text = sibling.get_text(strip=True)
-                    if p_text:
-                        context_parts.append(p_text)
+            search_root = asset_content if asset_content else h2.parent
 
-                    time_match = re.search(
-                        r"OPEN\s*(\d{1,2}:\d{2})\s*/\s*START\s*(\d{1,2}:\d{2})", p_text, re.IGNORECASE
-                    )
-                    if time_match:
-                        open_time = time_match.group(1)
-                        start_time = time_match.group(2)
+            # Flyer image
+            img = search_root.find("img", src=True)
+            if img:
+                event_image_url = img["src"]
 
-                elif sibling.name == "h4":
-                    # Performers listed one per line via <br> tags
-                    performer_text = sibling.get_text(separator="\n", strip=True)
-                    context_parts.append(performer_text)
-                    for line in performer_text.split("\n"):
-                        cleaned = self._clean_performer_name(line.strip())
-                        if cleaned and self._is_valid_performer_name(cleaned):
-                            performers.append(cleaned)
+            # Performers in <h3><p>...</p></h3>
+            for h3 in search_root.find_all("h3"):
+                performer_text = h3.get_text(separator="\n", strip=True)
+                context_parts.append(performer_text)
+                for line in performer_text.split("\n"):
+                    cleaned = self._clean_performer_name(line.strip())
+                    if cleaned and self._is_valid_performer_name(cleaned):
+                        performers.append(cleaned)
 
-                sibling = sibling.find_next_sibling()
+            # Times in <div>OPEN HH:MM / START HH:MM</div>
+            for div in search_root.find_all("div"):
+                div_text = div.get_text(strip=True)
+                time_match = re.search(r"OPEN\s*(\d{1,2}:\d{2})\s*/\s*START\s*(\d{1,2}:\d{2})", div_text, re.IGNORECASE)
+                if time_match:
+                    open_time = time_match.group(1)
+                    start_time = time_match.group(2)
+                    context_parts.append(div_text)
+                    break
 
             if not performers and not event_name:
                 continue
