@@ -20,6 +20,7 @@ import io
 import logging
 from datetime import timedelta
 
+from commons.image_coverage import build_image_coverage_report, log_image_coverage_report
 from commons.instagram_images import (
     INSTAGRAM_HASHTAGS,
     _resize_to_square,
@@ -175,6 +176,27 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Playlist: {playlist.id} — {week_label}")
         self.stdout.write(f"Entries: {len(entries)}")
+
+        # Image coverage pre-post check — surfaces silent scraper failures.
+        coverage_performers = [e.song.performer for e in all_entries]
+        coverage_report = build_image_coverage_report(coverage_performers, week_start)
+        log_image_coverage_report(coverage_report, context="post_weekly_playlist")
+        self.stdout.write(
+            f"Image coverage: {coverage_report.performers_with_image}/{coverage_report.performer_total} "
+            f"performers have artwork ({coverage_report.performer_coverage_ratio:.0%}); "
+            f"{coverage_report.schedules_with_event_image}/{coverage_report.schedule_total} "
+            f"schedules have event_image ({coverage_report.schedule_coverage_ratio:.0%})."
+        )
+        if coverage_report.performers_without_image:
+            self.stdout.write(f"Performers without artwork: {', '.join(coverage_report.performers_without_image)}")
+        if coverage_report.below_threshold:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"WARNING: performer image coverage {coverage_report.performer_coverage_ratio:.0%} "
+                    f"is below threshold {coverage_report.threshold:.0%}; "
+                    "post will fall back to default backgrounds for missing performers."
+                )
+            )
 
         # --- Build caption ---
         performer_song_pairs = [(e.song.performer, e.song) for e in entries]
