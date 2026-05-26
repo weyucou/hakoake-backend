@@ -142,6 +142,22 @@ class TestPostWeeklyPlaylistCommand(TestCase):
         self.playlist.refresh_from_db()
         self.assertEqual(self.playlist.instagram_post_id, "new_post_id")
 
+    def test_dry_run_emits_image_coverage_summary(self) -> None:
+        out = StringIO()
+        with self.assertLogs("commons.image_coverage", level="INFO") as cm:
+            call_command("post_weekly_playlist", "--dry-run", stdout=out)
+        output = out.getvalue()
+        self.assertIn("Image coverage:", output)
+        self.assertTrue(any("image_coverage" in msg for msg in cm.output))
+
+    def test_below_threshold_emits_warning_log(self) -> None:
+        # Default fixture has 1 performer with no image — coverage is 0%, below 70%.
+        out = StringIO()
+        with self.assertLogs("commons.image_coverage", level="WARNING") as cm:
+            call_command("post_weekly_playlist", "--dry-run", stdout=out)
+        self.assertTrue(any("image_coverage_below_threshold" in msg for msg in cm.output))
+        self.assertIn("WARNING", out.getvalue())
+
     def test_instagram_post_id_persisted_immediately_after_post(self) -> None:
         """AC: instagram_post_id is saved immediately after post_carousel returns."""
         handler_mock = MagicMock(return_value="fresh_post_id")
