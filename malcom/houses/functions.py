@@ -895,9 +895,10 @@ def render_shorts_intro_slide(
     """Render the opening slide of a YouTube Shorts playlist video (9:16, 1080×1920).
 
     Layout:
-      - Top stack: editorial label + display-serif title + period
-      - Stacked numbered lineup (single column), vermillion numerals + cream names
-      - Spotlighted performers get a small ★ marker
+      - Top stack: editorial label + display-serif title
+      - Thick rule divider
+      - "SET LIST" header + stacked numbered lineup (single column)
+      - Ruled-line texture fills empty lower space for DIY flyer feel
       - Corner wordmark bottom-left
     """
     canvas = brand_wash_canvas(VIDEO_SHORTS)
@@ -908,22 +909,35 @@ def render_shorts_intro_slide(
     draw.text((SP_LG, SP_LG), "HAKKO-AKKEI // TOKYO LIVE HOUSES", font=label_font, fill=INK_GRAY)
 
     title_font = display_font(96)
-    draw.text((SP_LG, SP_LG + 48), title_label, font=title_font, fill=AGED_CREAM)
+    title_y = SP_LG + 48
+    draw.text((SP_LG, title_y), title_label, font=title_font, fill=AGED_CREAM)
 
-    # Top-N stacked lineup
-    list_top = 280
-    list_bottom = video_h - 180
+    # Thick rule divider below title (DIY flyer aesthetic)
+    rule_y = title_y + 120
+    draw.rectangle([(SP_LG, rule_y), (video_w - SP_LG, rule_y + 3)], fill=FLYER_RED)
+
+    # "SET LIST" editorial header above lineup
+    setlist_y = rule_y + SP_MD
+    set_font = body_font(22, bold=True)
+    draw.text((SP_LG, setlist_y), "SET LIST", font=set_font, fill=INK_GRAY)
+
+    # Stacked lineup entries
+    list_top = setlist_y + 36
+    list_bottom = video_h - 240
     list_h = list_bottom - list_top
     entries = lineup[:SHORTS_MAX_PERFORMERS]
     if entries:
         line_h = list_h // len(entries)
-        line_h = max(64, min(line_h, 110))
-        num_font = display_font(int(line_h * 0.78))
-        name_font = display_font(int(line_h * 0.5))
+        line_h = max(80, min(line_h, 130))
+        num_font = display_font(int(line_h * 0.72))
+        name_font = display_font(int(line_h * 0.46))
         max_name_w = video_w - SP_LG * 2 - 130
 
         for i, (pos, name, spotlight) in enumerate(entries):
             y = list_top + i * line_h
+            # Thin row separator (except first)
+            if i > 0:
+                draw.rectangle([(SP_LG + 130, y), (video_w - SP_LG, y + 1)], fill=INK_GRAY)
             draw.text(
                 (SP_LG, y + line_h // 2),
                 f"{pos:02d}",
@@ -941,6 +955,21 @@ def render_shorts_intro_slide(
                     fill=AGED_CREAM,
                     anchor="lm",
                 )
+
+    # Ruled-line texture in lower empty space (DIY notebook feel)
+    last_entry_bottom = list_top + len(entries) * min(max(80, list_h // max(len(entries), 1)), 130)
+    rule_spacing = 28
+    rule_color = (110, 104, 96, 40)  # very faint INK_GRAY
+    canvas_rgba = canvas.convert("RGBA")
+    overlay = Image.new("RGBA", (video_w, video_h), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    ry = last_entry_bottom + rule_spacing
+    while ry < video_h - SP_XL:
+        overlay_draw.rectangle([(SP_LG, ry), (video_w - SP_LG, ry + 1)], fill=rule_color)
+        ry += rule_spacing
+    canvas_rgba.alpha_composite(overlay)
+    canvas = canvas_rgba.convert("RGB")
+    draw = ImageDraw.Draw(canvas)
 
     draw_corner_wordmark(draw, (SP_LG, video_h - SP_LG), anchor="lb", color=INK_GRAY, size=20)
     return canvas
@@ -970,12 +999,16 @@ def render_shorts_performer_slide(  # noqa: PLR0913
     label_font = body_font(26, bold=True)
     draw.text((SP_LG, SP_LG), "PERFORMER // NOW PLAYING", font=label_font, fill=INK_GRAY)
 
-    numeral_font = display_font(360)
+    numeral_font = display_font(300)
     draw.text((SP_LG, SP_LG + 30), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
+
+    # Thick rule separating numeral from performer info (DIY flyer aesthetic)
+    rule_y = SP_LG + 340
+    draw.rectangle([(SP_LG, rule_y), (video_w - SP_LG, rule_y + 3)], fill=FLYER_RED)
 
     text_left = SP_LG
     text_max_w = video_w - SP_LG * 2
-    cursor_y = SP_LG + 420
+    cursor_y = rule_y + SP_MD
 
     name_font = display_font(96)
     name_lines = wrap_text(draw, performer.name, name_font, text_max_w)
@@ -990,8 +1023,10 @@ def render_shorts_performer_slide(  # noqa: PLR0913
 
     if song_title:
         song_font = body_font(32)
-        draw.text((text_left, cursor_y + SP_SM), f'"{song_title}"', font=song_font, fill=AGED_CREAM, anchor="lt")
-        cursor_y += SP_SM + 42
+        # Thin rule before song info block
+        draw.rectangle([(text_left, cursor_y + SP_SM - 2), (video_w - SP_LG, cursor_y + SP_SM - 1)], fill=INK_GRAY)
+        draw.text((text_left, cursor_y + SP_SM + 8), f"— {song_title}", font=song_font, fill=AGED_CREAM, anchor="lt")
+        cursor_y += SP_SM + 48
 
     if performance_date:
         date_font = body_font(32, bold=True)
@@ -1051,19 +1086,34 @@ def render_shorts_closing_slide(closing_text: str, channel_url: str) -> Image.Im
     label_font = body_font(28, bold=True)
     draw.text((video_w // 2, SP_LG), "HAKKO-AKKEI // SUBSCRIBE", font=label_font, fill=INK_GRAY, anchor="mt")
 
-    closing_font = display_font(108)
+    # Thick rule divider (DIY flyer aesthetic)
+    draw.rectangle([(SP_LG, SP_LG + 48), (video_w - SP_LG, SP_LG + 51)], fill=FLYER_RED)
+
+    closing_font = display_font(120)
     closing_lines = wrap_text(draw, closing_text, closing_font, video_w - 2 * SP_LG)
-    msg_top = 280
+    msg_top = 300
     for line in closing_lines[:3]:
         draw.text((video_w // 2, msg_top), line, font=closing_font, fill=AGED_CREAM, anchor="mt")
-        msg_top += 124
+        msg_top += 138
 
-    follow_font = body_font(34, bold=True)
+    # Thin rule before CTA block
+    draw.rectangle([(SP_LG, msg_top + SP_SM), (video_w - SP_LG, msg_top + SP_SM + 1)], fill=INK_GRAY)
+
+    follow_font = body_font(36, bold=True)
     draw.text(
-        (video_w // 2, msg_top + SP_MD),
+        (video_w // 2, msg_top + SP_MD + SP_SM),
         "Follow @hakkoakkei",
         font=follow_font,
         fill=FLYER_RED,
+        anchor="mt",
+    )
+
+    hashtag_font = body_font(24, bold=True)
+    draw.text(
+        (video_w // 2, msg_top + SP_MD + SP_SM + 52),
+        "#HAKKOAKKEI  #TOKYOLIVEHOUSES",
+        font=hashtag_font,
+        fill=INK_GRAY,
         anchor="mt",
     )
 
