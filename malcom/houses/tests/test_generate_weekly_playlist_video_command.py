@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from houses.models import WeeklyPlaylist
@@ -266,3 +266,95 @@ class TestGenerateWeeklyPlaylistVideoCommand(TestCase):
         self.playlist.refresh_from_db()
         self.assertEqual(self.playlist.intro_youtube_video_id, "persisted_vid")
         self.assertIsNone(self.playlist.intro_video_inserted_datetime)
+
+
+@override_settings(INSTAGRAM_USER_ID="test_ig_user_id")
+class TestGenerateWeeklyPlaylistVideoStoryFormat(TestCase):
+    def setUp(self) -> None:
+        self.playlist = WeeklyPlaylist.objects.create(
+            date=date(2026, 3, 30),
+            youtube_playlist_id="PLtest123",
+            youtube_playlist_url="https://www.youtube.com/playlist?list=PLtest123",
+        )
+
+    @patch("houses.management.commands.generate_weekly_playlist_video.post_story")
+    @patch("houses.management.commands.generate_weekly_playlist_video.get_instagram_token")
+    @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video_story")
+    def test_format_story_generates_and_posts_to_instagram(
+        self,
+        mock_story_gen: MagicMock,
+        mock_get_token: MagicMock,
+        mock_post_story: MagicMock,
+    ) -> None:
+        """AC: --format story generates the story video and posts it to Instagram."""
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp_video:
+            mock_story_gen.return_value = Path(tmp_video.name)
+            mock_token = MagicMock()
+            mock_token.access_token = "test_token"
+            mock_get_token.return_value = mock_token
+            mock_post_story.return_value = "story_12345"
+
+            call_command(
+                "generate_weekly_playlist_video",
+                str(self.playlist.id),
+                format="story",
+            )
+
+        mock_story_gen.assert_called_once_with(self.playlist)
+        mock_post_story.assert_called_once()
+        self.playlist.refresh_from_db()
+        self.assertEqual(self.playlist.instagram_story_id, "story_12345")
+
+    @patch("houses.management.commands.generate_weekly_playlist_video.post_story")
+    @patch("houses.management.commands.generate_weekly_playlist_video.get_instagram_token")
+    @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video_story")
+    def test_format_story_skips_if_already_posted(
+        self,
+        mock_story_gen: MagicMock,
+        mock_get_token: MagicMock,
+        mock_post_story: MagicMock,
+    ) -> None:
+        """AC: --format story skips posting if instagram_story_id is already set."""
+        self.playlist.instagram_story_id = "already_posted_id"
+        self.playlist.save(update_fields=["instagram_story_id"])
+
+        call_command(
+            "generate_weekly_playlist_video",
+            str(self.playlist.id),
+            format="story",
+        )
+
+        mock_story_gen.assert_not_called()
+        mock_post_story.assert_not_called()
+
+    @patch("houses.management.commands.generate_weekly_playlist_video.post_story")
+    @patch("houses.management.commands.generate_weekly_playlist_video.get_instagram_token")
+    @patch("houses.management.commands.generate_weekly_playlist_video.generate_weekly_playlist_video_story")
+    def test_format_story_force_re_posts(
+        self,
+        mock_story_gen: MagicMock,
+        mock_get_token: MagicMock,
+        mock_post_story: MagicMock,
+    ) -> None:
+        """AC: --format story --force re-posts even when instagram_story_id is set."""
+        self.playlist.instagram_story_id = "old_story_id"
+        self.playlist.save(update_fields=["instagram_story_id"])
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp_video:
+            mock_story_gen.return_value = Path(tmp_video.name)
+            mock_token = MagicMock()
+            mock_token.access_token = "test_token"
+            mock_get_token.return_value = mock_token
+            mock_post_story.return_value = "new_story_id"
+
+            call_command(
+                "generate_weekly_playlist_video",
+                str(self.playlist.id),
+                format="story",
+                force=True,
+            )
+
+        mock_story_gen.assert_called_once()
+        mock_post_story.assert_called_once()
+        self.playlist.refresh_from_db()
+        self.assertEqual(self.playlist.instagram_story_id, "new_story_id")

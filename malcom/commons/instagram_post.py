@@ -159,6 +159,36 @@ def post_carousel(
     return publish_media(user_id, access_token, creation_id)
 
 
+def create_story_container(user_id: str, access_token: str, video_url: str) -> str:
+    """Create a Stories media container from a public video URL. Returns container_id."""
+    url = f"{INSTAGRAM_API_BASE}/{user_id}/media"
+    params = {
+        "media_type": "STORIES",
+        "video_url": video_url,
+        "access_token": access_token,
+    }
+    response = requests.post(url, params=params, timeout=30)
+    response.raise_for_status()
+    container_id = response.json()["id"]
+    logger.debug(f"Created story container: {container_id} (video_url={video_url})")
+    return container_id
+
+
+def post_story(user_id: str, access_token: str, video_bytes: bytes, filename: str) -> str:
+    """Post a video as an Instagram Story. Returns the published story_id.
+
+    Args:
+        user_id: Instagram user ID
+        access_token: Valid Instagram access token
+        video_bytes: MP4 video file bytes (H.264, AAC audio, 9:16, ≤60s, ≤100MB)
+        filename: Filename used when uploading to the CDN (e.g. "story_20250529.mp4")
+    """
+    public_url = upload_to_litterbox(video_bytes, filename)
+    container_id = create_story_container(user_id, access_token, public_url)
+    wait_for_container_finished(container_id, access_token)
+    return publish_media(user_id, access_token, container_id)
+
+
 def build_caption(description: str, playlist_url: str, extra_hashtags: tuple[str, ...] = ()) -> str:
     """Build an Instagram caption from a playlist description.
 

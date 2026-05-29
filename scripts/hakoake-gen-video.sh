@@ -34,6 +34,9 @@ uv run python manage.py generate_weekly_playlist_video "$playlist_db_id"
 echo "Generating and uploading YouTube Shorts for playlist id=${playlist_db_id}..."
 uv run python manage.py generate_weekly_playlist_video "$playlist_db_id" --format shorts
 
+echo "Posting Instagram Story for playlist id=${playlist_db_id}..."
+uv run python manage.py generate_weekly_playlist_video "$playlist_db_id" --format story
+
 echo "Posting weekly playlist announcement to Instagram..."
 uv run python manage.py post_weekly_playlist --playlist-id="$playlist_db_id"
 
