@@ -847,6 +847,9 @@ SHORTS_AUDIO_FADE_DURATION = 0.5
 SHORTS_MIN_NAME_FONT_SIZE = 32
 PERFORMER_SAMPLES_DIR = "performer_samples"
 
+STORY_MAX_PERFORMERS = 5
+STORY_MAX_TOTAL_DURATION = 60.0  # Instagram Graph API Story duration limit
+
 
 def download_performer_song_audio(song: PerformerSong, *, force: bool = False) -> Path | None:
     """Download audio from a performer's YouTube song, caching to data/performer_samples/<song_id>.mp3.
@@ -1517,12 +1520,14 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901, PLR0912
     timestamp_format: str,
     max_performers: int = SHORTS_MAX_PERFORMERS,
     intro_voiceover: str | None = None,
+    include_closing: bool = True,
 ) -> Path:
     """Generate a vertical 9:16 YouTube Shorts video (≤70s) from a playlist.
 
     Shorts pacing keeps the runtime under 70s by capping the number of
     performer slides and using shorter fixed durations per slide. Each slide
     has a TTS voice-over mixed with background/song audio.
+    Set include_closing=False to omit the closing slide (e.g. for Instagram Stories).
     """
     temp_dir = Path(tempfile.mkdtemp())
     logger.info(f"Created temp directory: {temp_dir}")
@@ -1530,8 +1535,9 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901, PLR0912
     entry_set = getattr(playlist, entry_set_name).select_related("song__performer")
     all_entries = list(entry_set.order_by("position"))
 
-    # Budget: leave room for intro + closing inside SHORTS_MAX_TOTAL_DURATION.
-    budget = SHORTS_MAX_TOTAL_DURATION - SHORTS_INTRO_DURATION - SHORTS_CLOSING_DURATION
+    # Budget: leave room for intro (+ optional closing) inside SHORTS_MAX_TOTAL_DURATION.
+    closing_budget = SHORTS_CLOSING_DURATION if include_closing else 0.0
+    budget = SHORTS_MAX_TOTAL_DURATION - SHORTS_INTRO_DURATION - closing_budget
     capacity_by_duration = int(budget // SHORTS_PERFORMER_DURATION)
     cap = max(1, min(max_performers, capacity_by_duration))
     entries = all_entries[:cap]
@@ -1605,15 +1611,16 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901, PLR0912
         slides.append((performer_path, SHORTS_PERFORMER_DURATION))
         performer_entries.append((performer_path, SHORTS_PERFORMER_DURATION, entry.song, voiceover_text))
 
-    # 3. Closing slide
-    logger.info("Creating shorts closing slide...")
-    closing_slide = render_shorts_closing_slide(
-        closing_text=closing_text,
-        channel_url="https://www.youtube.com/@hakkoakkei",
-    )
-    closing_path = temp_dir / "shorts_closing.png"
-    closing_slide.save(closing_path)
-    slides.append((closing_path, SHORTS_CLOSING_DURATION))
+    # 3. Closing slide (omitted for formats that don't need it, e.g. Instagram Stories)
+    if include_closing:
+        logger.info("Creating shorts closing slide...")
+        closing_slide = render_shorts_closing_slide(
+            closing_text=closing_text,
+            channel_url="https://www.youtube.com/@hakkoakkei",
+        )
+        closing_path = temp_dir / "shorts_closing.png"
+        closing_slide.save(closing_path)
+        slides.append((closing_path, SHORTS_CLOSING_DURATION))
 
     # Generate TTS voice-over audio files
     async def _gen_tts(text: str, path: Path) -> None:
@@ -1718,8 +1725,8 @@ def _generate_playlist_video_shorts(  # noqa: PLR0913, PLR0915, C901, PLR0912
 
             performer_offset += slide_duration
 
-        # Closing: background music with fade-out
-        if background_music_path.exists():
+        # Closing: background music with fade-out (only when closing slide is included)
+        if include_closing and background_music_path.exists():
             bg_closing = AudioFileClip(str(background_music_path))
             bg_closing = _loop_to_duration(bg_closing, SHORTS_CLOSING_DURATION)
             bg_closing = bg_closing.with_volume_scaled(0.4)
@@ -1788,4 +1795,30 @@ def generate_weekly_playlist_video_shorts(
         timestamp_format="%Y%m%d",
         max_performers=max_performers,
         intro_voiceover=intro_voiceover,
+    )
+
+
+def generate_weekly_playlist_video_story(
+    playlist: WeeklyPlaylist,
+    max_performers: int = STORY_MAX_PERFORMERS,
+) -> Path:
+    """Generate an Instagram Story (9:16, ≤55s) video for a weekly playlist.
+
+    Structure: intro (5s) + up to 5 performer slides (10s each) = ≤55s.
+    Closing slide is omitted to stay within the 60s Instagram Graph API limit.
+    """
+    week_start = playlist.date
+    intro_voiceover = f"Bands playing the week of {week_start.strftime('%B')} {_ordinal_day(week_start.day)}"
+    return _generate_playlist_video_shorts(
+        playlist=playlist,
+        entry_set_name="weeklyplaylistentry_set",
+        date_start=week_start,
+        date_end=week_start + timezone.timedelta(days=7),
+        title_label=f"WEEK / {week_start.strftime('%b %-d').upper()}",
+        closing_text="",
+        filename_prefix="playlist_story_week_",
+        timestamp_format="%Y%m%d",
+        max_performers=max_performers,
+        intro_voiceover=intro_voiceover,
+        include_closing=False,
     )

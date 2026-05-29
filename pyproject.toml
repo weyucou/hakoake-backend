@@ -93,7 +93,7 @@ unsafe-fixes = false
 
 [tool.ruff.lint]
 select = ["ALL"]
-extend-per-file-ignores = { "**/__init__.py" = ["I", "F403"] }
+extend-per-file-ignores = { "**/__init__.py" = ["I", "F403"], "**/tests/**" = ["S105", "S106", "S107"] }
 extend-safe-fixes = [
     "D200",  # unnecessary-multiline-docstring
     "ANN204"  # missing-return-type-special-method (__init__)

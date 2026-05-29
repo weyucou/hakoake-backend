@@ -2,14 +2,22 @@
 
 from pathlib import Path
 
+from commons.instagram_post import post_story
+from commons.instagram_utils import get_instagram_token
 from commons.youtube_utils import insert_video_at_position, post_video_comment, upload_video_to_youtube
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
-from houses.functions import generate_weekly_playlist_video, generate_weekly_playlist_video_shorts
+from houses.functions import (
+    generate_weekly_playlist_video,
+    generate_weekly_playlist_video_shorts,
+    generate_weekly_playlist_video_story,
+)
 from houses.models import WeeklyPlaylist
 
 VIDEO_FORMAT_STANDARD = "standard"
 VIDEO_FORMAT_SHORTS = "shorts"
+VIDEO_FORMAT_STORY = "story"
 
 
 class Command(BaseCommand):
@@ -44,12 +52,13 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--format",
-            choices=[VIDEO_FORMAT_STANDARD, VIDEO_FORMAT_SHORTS],
+            choices=[VIDEO_FORMAT_STANDARD, VIDEO_FORMAT_SHORTS, VIDEO_FORMAT_STORY],
             default=VIDEO_FORMAT_STANDARD,
             dest="video_format",
             help=(
                 "Output format: 'standard' for 1920x1080 long-form, "
-                "'shorts' for 1080x1920 9:16 ≤60s YouTube Shorts (no narration)"
+                "'shorts' for 1080x1920 9:16 ≤60s YouTube Shorts, "
+                "'story' for 1080x1920 9:16 ≤55s Instagram Story (5 performers, no closing)"
             ),
         )
 
@@ -140,6 +149,66 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS("Posted playlist description as comment."))
             else:
                 self.stderr.write(self.style.WARNING("Failed to post comment — manual comment may be needed."))
+            return
+
+        if video_format == VIDEO_FORMAT_STORY:
+            self.stdout.write("Format: story (9:16, ≤55s, Instagram Story)")
+
+            if not force and playlist.instagram_story_id:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Story already posted (story_id={playlist.instagram_story_id}); skipping. "
+                        f"Pass --force to re-post."
+                    )
+                )
+                return
+
+            if force and playlist.instagram_story_id:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"--force: clearing previously stored story state "
+                        f"(previous story_id={playlist.instagram_story_id!r})."
+                    )
+                )
+                playlist.instagram_story_id = ""
+                playlist.save(update_fields=["instagram_story_id"])
+
+            story_filepath = generate_weekly_playlist_video_story(playlist)
+            self.stdout.write(self.style.SUCCESS("\n=== Story Video Generated ===\n"))
+            self.stdout.write(f"Video saved to: {story_filepath}")
+
+            if skip_update_playlist:
+                self.stdout.write("Skipping Instagram Story post (--skip-update-playlist)")
+                return
+
+            self.stdout.write("Posting to Instagram Story...")
+            if not settings.INSTAGRAM_USER_ID:
+                self.stderr.write(self.style.ERROR("INSTAGRAM_USER_ID not set in .env"))
+                return
+
+            cert_file = settings.OAUTH_LOCALHOST_CERT
+            key_file = settings.OAUTH_LOCALHOST_KEY
+            token_cache = cert_file.parent / "instagram_token.json"
+            try:
+                token = get_instagram_token(cert_file, key_file, token_cache)
+            except Exception as exc:  # noqa: BLE001
+                self.stderr.write(self.style.ERROR(f"Failed to obtain Instagram token: {exc}"))
+                return
+            user_id = settings.INSTAGRAM_USER_ID
+            access_token = token.access_token
+
+            week_str = playlist.date.strftime("%Y%m%d")
+            story_filename = f"story_{week_str}.mp4"
+            video_bytes = story_filepath.read_bytes()
+            try:
+                story_id = post_story(user_id, access_token, video_bytes, story_filename)
+            except Exception as exc:  # noqa: BLE001
+                self.stderr.write(self.style.ERROR(f"Failed to post Instagram Story: {exc}"))
+                return
+
+            playlist.instagram_story_id = story_id
+            playlist.save(update_fields=["instagram_story_id"])
+            self.stdout.write(self.style.SUCCESS(f"Instagram Story posted: {story_id}"))
             return
 
         # Idempotency branches — only relevant when we would otherwise upload/insert.
