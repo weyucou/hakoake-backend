@@ -228,3 +228,78 @@ def get_threads_token(cert_file: Path, key_file: Path, token_cache_file: Path) -
     _save_token(token, token_cache_file)
     logger.info(f"Threads OAuth complete -- user_id={user_id}")
     return token
+
+
+THREADS_MAX_CHARS = 500
+
+
+def _truncate_to_threads_limit(description: str, url: str) -> str:
+    """Truncate description at a line boundary so the full URL fits within THREADS_MAX_CHARS."""
+    full = f"{description}\n{url}"
+    if len(full) <= THREADS_MAX_CHARS:
+        return full
+    budget = THREADS_MAX_CHARS - len(f"…\n{url}")
+    lines = description.splitlines()
+    kept: list[str] = []
+    total = 0
+    for line in lines:
+        needed = len(line) + (1 if kept else 0)
+        if total + needed > budget:
+            break
+        kept.append(line)
+        total += needed
+    return "\n".join(kept) + f"…\n{url}"
+
+
+def _build_weekly_thread_text(playlist: "object", lineup_lines: list[str]) -> str:
+    """Build the Threads post text for a weekly playlist."""
+    from houses.formatting import build_playlist_description  # noqa: PLC0415
+
+    lineup_str = "\n".join(lineup_lines)
+    period_text = f"week of {playlist.date.strftime('%Y-%m-%d')}"  # type: ignore[attr-defined]
+    description = build_playlist_description(period_text, lineup_str)
+    url = playlist.youtube_playlist_url or f"https://www.youtube.com/playlist?list={playlist.youtube_playlist_id}"  # type: ignore[attr-defined]
+    return _truncate_to_threads_limit(description, url)
+
+
+def _build_monthly_thread_text(playlist: "object", lineup_lines: list[str]) -> str:
+    """Build the Threads post text for a monthly playlist."""
+    from houses.formatting import build_playlist_description  # noqa: PLC0415
+
+    lineup_str = "\n".join(lineup_lines)
+    period_text = playlist.date.strftime("%B %Y")  # type: ignore[attr-defined]
+    description = build_playlist_description(period_text, lineup_str)
+    url = playlist.youtube_playlist_url or f"https://www.youtube.com/playlist?list={playlist.youtube_playlist_id}"  # type: ignore[attr-defined]
+    return _truncate_to_threads_limit(description, url)
+
+
+def create_thread_post(user_id: str, access_token: str, text: str) -> str:
+    """Publish a text-only Threads post via the two-step create-container/publish flow.
+
+    Returns the published thread ID.
+    """
+    create_resp = requests.post(
+        f"{THREADS_API_BASE}/{user_id}/threads",
+        params={
+            "media_type": "TEXT",
+            "text": text,
+            "access_token": access_token,
+        },
+        timeout=30,
+    )
+    create_resp.raise_for_status()
+    container_id = create_resp.json()["id"]
+    logger.info(f"Threads container created: {container_id}")
+
+    publish_resp = requests.post(
+        f"{THREADS_API_BASE}/{user_id}/threads_publish",
+        params={
+            "creation_id": container_id,
+            "access_token": access_token,
+        },
+        timeout=30,
+    )
+    publish_resp.raise_for_status()
+    thread_id = publish_resp.json()["id"]
+    logger.info(f"Threads post published: {thread_id}")
+    return thread_id
