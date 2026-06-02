@@ -83,6 +83,7 @@ class Command(BaseCommand):
                         "date": playlist.date.strftime("%Y-%m-%d"),
                         "youtube_playlist_id": playlist.youtube_playlist_id,
                         "youtube_playlist_url": playlist.youtube_playlist_url,
+                        "instagram_post_id": playlist.instagram_post_id or None,
                     }
                 )
             )
