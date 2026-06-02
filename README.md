@@ -111,14 +111,4 @@ The following are required for this project to be integrated with auto-deploy us
 > With `github flow` master is the *release* branch and features are added through Pull-Requests (PRs)
 > On merge to master the code will be deployed to the production environment.
 
-These values are configured as CircleCI project environment variables (or context values for releases), with one GitHub Actions secret used to register the project:
-
-| Variable | Purpose |
-|----------|---------|
-| `AWS_ACCESS_KEY_ID` | AWS credentials used by the `build-package` / `publish-github-release` jobs to build and deploy. |
-| `AWS_SECRET_ACCESS_KEY` | Secret half of the AWS credentials above. |
-| `AWS_DEFAULT_REGION` | Target AWS region (e.g. `ap-northeast-1`). |
-| `AWS_ROLE_ARN` | ARN of the deploy role assumed via the configured AWS profile (`~/.aws/config`). |
-| `AWS_PROFILE` | Name of the AWS profile written to `~/.aws/config` for deploy. |
-| `GITHUB_TOKEN` | Token used by `ghr` in the `publish-github-release` job to publish GitHub releases. Provided via the `github release context`. |
-| `CIRCLECI_API_KEY` | GitHub Actions **secret** used by `.github/workflows/register-circleci-project.yml` to follow/register the repository in CircleCI. |
+[[LIST REQUIRED ENVIRONMENT VARIABLES HERE]]

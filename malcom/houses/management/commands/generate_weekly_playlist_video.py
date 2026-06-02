@@ -138,21 +138,27 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"Uploaded shorts: https://youtu.be/{shorts_video_id}"))
 
             # Post playlist description as a comment on the shorts video
-            entries = playlist.weeklyplaylistentry_set.select_related("song__performer").order_by("position")
+            entries = list(playlist.weeklyplaylistentry_set.select_related("song__performer").order_by("position"))
             date_start = playlist.date
             date_end = date_start + timezone.timedelta(days=7)
+            performer_ids = [e.song.performer_id for e in entries]
+            schedules = (
+                PerformanceSchedule.objects.filter(
+                    performers__in=performer_ids,
+                    performance_date__gte=date_start,
+                    performance_date__lt=date_end,
+                )
+                .select_related("live_house")
+                .prefetch_related("performers")
+            )
+            schedule_by_performer: dict[int, PerformanceSchedule] = {}
+            for s in schedules:
+                for p in s.performers.all():
+                    schedule_by_performer.setdefault(p.pk, s)
             lineup_lines = []
             for e in entries:
                 performer = e.song.performer
-                performance = (
-                    PerformanceSchedule.objects.filter(
-                        performers=performer,
-                        performance_date__gte=date_start,
-                        performance_date__lt=date_end,
-                    )
-                    .select_related("live_house")
-                    .first()
-                )
+                performance = schedule_by_performer.get(performer.pk)
                 line = f"{e.position}. {performer.name}"
                 if performance:
                     date_label = performance.performance_date.strftime("%b %-d")
