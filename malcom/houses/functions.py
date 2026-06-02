@@ -24,14 +24,19 @@ from commons.design import (
     SP_XL,
     VIDEO_SHORTS,
     VIDEO_WIDESCREEN,
+    apply_paper_grain,
     body_font,
     brand_wash_canvas,
     build_qr_code,
     display_font,
     draw_corner_wordmark,
+    draw_torn_edge,
+    load_brand_background,
+    scale_to_fill,
     wrap_text,
 )
 from commons.functions import get_month_end
+from commons.instagram_images import _load_performer_image
 from django.conf import settings
 from django.core import management
 from django.db.models import Count
@@ -1032,30 +1037,51 @@ def render_shorts_performer_slide(  # noqa: PLR0913, PLR0915
     """Render a single performer slide for a Shorts playlist video.
 
     Layout (1080×1920):
-      - Top section: oversized vermillion position numeral
-      - Middle section: display-serif performer name + romaji subtitle
+      - Top ~45%: performer photo (full-bleed, scale-to-fill) or brand bg fallback
+      - Torn-paper edge between photo and caption panel
+      - Caption panel: oversized vermillion position numeral straddling the seam
+      - Performer name + romaji subtitle
       - Song section: large centered "♪ {song}" overlay
-      - Lower-middle section: venue + date metadata
+      - Venue + date metadata
       - Bottom QR card (artist link only — single QR fits the punchy Shorts pacing)
       - Corner wordmark
     """
-    canvas = brand_wash_canvas(VIDEO_SHORTS)
-    draw = ImageDraw.Draw(canvas)
     video_w, video_h = VIDEO_SHORTS
+    photo_h = int(video_h * 0.45)
 
+    # --- Photo region (top 45%) ---
+    source_img = _load_performer_image(performer)
+    canvas = Image.new("RGB", VIDEO_SHORTS, PAPER_BLACK)
+    if source_img is not None:
+        photo = scale_to_fill(source_img, (video_w, photo_h))
+    else:
+        bg = load_brand_background((video_w, photo_h))
+        photo = bg if bg is not None else Image.new("RGB", (video_w, photo_h), PAPER_BLACK)
+    canvas.paste(photo, (0, 0))
+
+    # --- Caption panel (bottom 55%) ---
+    panel = Image.new("RGB", (video_w, video_h - photo_h), PAPER_BLACK)
+    canvas.paste(panel, (0, photo_h))
+
+    # --- Torn edge between photo and caption panel ---
+    draw = ImageDraw.Draw(canvas)
+    draw_torn_edge(draw, photo_h, video_w, PAPER_BLACK, amplitude=8, segments=70, seed=position * 7 + 3)
+
+    # Apply paper grain over the whole composition
+    canvas = apply_paper_grain(canvas)
+    draw = ImageDraw.Draw(canvas)
+
+    # --- Oversized position numeral straddling the seam ---
+    numeral_font = display_font(220)
+    draw.text((SP_LG, photo_h + 6), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lm")
+
+    # Label in top-left corner of photo
     label_font = body_font(26, bold=True)
-    draw.text((SP_LG, SP_LG), "PERFORMER // NOW PLAYING", font=label_font, fill=INK_GRAY)
+    draw.text((SP_LG, SP_LG), "PERFORMER // NOW PLAYING", font=label_font, fill=AGED_CREAM)
 
-    numeral_font = display_font(300)
-    draw.text((SP_LG, SP_LG + 30), f"{position:02d}", font=numeral_font, fill=FLYER_RED, anchor="lt")
-
-    # Thick rule separating numeral from performer info (DIY flyer aesthetic)
-    rule_y = SP_LG + 340
-    draw.rectangle([(SP_LG, rule_y), (video_w - SP_LG, rule_y + 3)], fill=FLYER_RED)
-
-    text_left = SP_LG
-    text_max_w = video_w - SP_LG * 2
-    cursor_y = rule_y + SP_MD
+    text_left = SP_LG + 200
+    text_max_w = video_w - text_left - SP_LG
+    cursor_y = photo_h + SP_LG
 
     name_font = display_font(96)
     name_lines = wrap_text(draw, performer.name, name_font, text_max_w)
@@ -1071,7 +1097,8 @@ def render_shorts_performer_slide(  # noqa: PLR0913, PLR0915
     if song_title:
         song_font = display_font(72)
         song_text = f"♪ {song_title}"
-        song_lines = wrap_text(draw, song_text, song_font, text_max_w)
+        song_wrap_w = video_w - SP_LG * 2
+        song_lines = wrap_text(draw, song_text, song_font, song_wrap_w)
         cursor_y += SP_SM
         for line in song_lines[:2]:
             draw.text((video_w // 2, cursor_y), line, font=song_font, fill=AGED_CREAM, anchor="mt")
