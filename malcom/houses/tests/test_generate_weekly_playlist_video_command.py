@@ -210,13 +210,14 @@ class TestGenerateWeeklyPlaylistVideoCommand(TestCase):
         mock_upload: MagicMock,
         mock_insert: MagicMock,
     ) -> None:
-        """AC: --format shorts routes to the shorts generator and never uploads/inserts."""
-        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp_video:
+        """AC: --format shorts routes to the shorts generator; without a secrets file nothing is uploaded/inserted."""
+        with tempfile.TemporaryDirectory() as tmp_dir, tempfile.NamedTemporaryFile(suffix=".mp4") as tmp_video:
             mock_shorts_gen.return_value = Path(tmp_video.name)
             call_command(
                 "generate_weekly_playlist_video",
                 str(self.playlist.id),
                 format="shorts",
+                secrets_file=str(Path(tmp_dir) / "missing_client_secret.json"),
             )
 
         mock_shorts_gen.assert_called_once_with(self.playlist)

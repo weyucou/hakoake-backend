@@ -127,12 +127,12 @@ class TestRenderVideoClosingSlide(TestCase):
 class TestRenderShortsIntroSlide(TestCase):
     def test_shorts_intro_with_full_lineup(self) -> None:
         lineup = [
-            (1, "残響のリフレイン", True),
-            (2, "OGRE YOU ASSHOLE", False),
-            (3, "tricot", False),
-            (4, "Mass of the Fermenting Dregs", False),
-            (5, "envy", True),
-            (6, "toe", False),
+            (1, "残響のリフレイン", True, None, "下北沢SHELTER", "13th Apr"),
+            (2, "OGRE YOU ASSHOLE", False, None, "新代田FEVER", "14th Apr"),
+            (3, "tricot", False, None, None, None),
+            (4, "Mass of the Fermenting Dregs", False, None, "渋谷CLUB QUATTRO", None),
+            (5, "envy", True, None, None, "16th Apr"),
+            (6, "toe", False, None, "代官山UNIT", "17th Apr"),
         ]
         img = render_shorts_intro_slide(title_label="Week of 2026-04-13", lineup=lineup)
         self.assertIsInstance(img, Image.Image)
@@ -143,7 +143,7 @@ class TestRenderShortsIntroSlide(TestCase):
         self.assertEqual(img.size, SHORTS_SIZE)
 
     def test_shorts_intro_caps_long_lineup(self) -> None:
-        oversized_lineup = [(i, f"Performer {i}", False) for i in range(1, 30)]
+        oversized_lineup = [(i, f"Performer {i}", False, None, f"Venue {i}", "1st Apr") for i in range(1, 30)]
         img = render_shorts_intro_slide(title_label="Big Month", lineup=oversized_lineup)
         self.assertEqual(img.size, SHORTS_SIZE)
 
