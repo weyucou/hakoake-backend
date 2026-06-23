@@ -188,6 +188,145 @@ class TestSearchAndCreatePerformerSongsChannelValidation(TestCase):
         self.assertEqual(link.platform_id, "UC_RAN")
 
 
+class TestIsRelevantToPerformer(TestCase):
+    """Tests for YouTubeSearcher._is_relevant_to_performer() — regression #131."""
+
+    def setUp(self) -> None:
+        self.searcher = YouTubeSearcher()
+
+    def _video(self, title: str, channel_name: str = "") -> dict:
+        return {"title": title, "channel_name": channel_name}
+
+    def test_title_starts_with_performer_matches(self) -> None:
+        self.assertTrue(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video("RAN - Official MV", "RAN"),
+                "RAN",
+            )
+        )
+
+    def test_performer_name_in_channel_matches(self) -> None:
+        self.assertTrue(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video("Live at Shibuya", "Hold me tight Official"),
+                "Hold me tight",
+            )
+        )
+
+    def test_bracketed_performer_at_title_start_matches(self) -> None:
+        """[Artist] or (Artist) at the very start of the title is a valid artist tag."""
+        self.assertTrue(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video("[Hold me tight] Official MV", ""),
+                "Hold me tight",
+            )
+        )
+
+    def test_bracketed_performer_mid_title_rejected(self) -> None:
+        """Regression #131: (PerformerName) appearing mid-title as a song-title translation
+        must NOT match — only bracket tags at the start of the title are accepted.
+        """
+        self.assertFalse(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video(
+                    "BTS (방탄소년단) - 잡아줘 (Hold Me Tight)  Live Concert in Japan",
+                    "BTS",
+                ),
+                "Hold me tight",
+            )
+        )
+
+    def test_bts_dope_title_rejected_for_dope_flamingo(self) -> None:
+        """Regression #131: 'BTS - DOPE' must not match performer 'Dope Flamingo'."""
+        self.assertFalse(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video(
+                    "BTS (방탄소년단) 'DOPE' (쩔어) Love Yourself : Speak Youself [Live Video ]",
+                    "BTS",
+                ),
+                "Dope Flamingo",
+            )
+        )
+
+    def test_gorilla_song_rejected_for_gorilla_snoc(self) -> None:
+        """Regression #131: 'Bruno Mars - Gorilla' must not match performer 'GORILLA SNOC'."""
+        self.assertFalse(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video("Bruno Mars - Gorilla (Live at iHeartRadio Music Festival 2013)", "Bruno Mars"),
+                "GORILLA SNOC",
+            )
+        )
+
+    def test_unrelated_video_rejected(self) -> None:
+        self.assertFalse(
+            self.searcher._is_relevant_to_performer(  # noqa: SLF001
+                self._video("Lady Gaga - Bad Romance", "Lady Gaga"),
+                "RAN",
+            )
+        )
+
+
+class TestSearchAndCreateSongCreationGate(TestCase):
+    """Regression #131: songs must not be stored when title doesn't start with performer
+    name AND channel name doesn't match.
+    """
+
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    def test_bts_hold_me_tight_not_stored_for_hold_me_tight_performer(self, mock_search: MagicMock) -> None:
+        performer = _create_performer("Hold me tight")
+        mock_search.return_value = [
+            {
+                "video_id": "bts_hold",
+                "title": "BTS (방탄소년단) - 잡아줘 (Hold Me Tight)  Live Concert in Japan",
+                "channel_name": "BTS",
+                "channel_id": "UC_BTS",
+                "youtube_url": "https://www.youtube.com/watch?v=bts_hold",
+                "view_count": 5_000_000,
+                "duration_seconds": 240,
+            }
+        ]
+        songs = search_and_create_performer_songs(performer)
+        self.assertEqual(songs, [], "BTS 'Hold Me Tight' must not be stored for performer 'Hold me tight'")
+
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    def test_correct_song_created_when_title_starts_with_performer(self, mock_search: MagicMock) -> None:
+        """A song whose title starts with the performer name is stored even if it's the only signal."""
+        performer = _create_performer("Hold me tight")
+        mock_search.return_value = [
+            {
+                "video_id": "hmt_vid",
+                "title": "Hold me tight - Official MV 2024",
+                "channel_name": "Unknown Label",
+                "channel_id": "UC_UNKNOWN",
+                "youtube_url": "https://www.youtube.com/watch?v=hmt_vid",
+                "view_count": 10_000,
+                "duration_seconds": 210,
+            }
+        ]
+        songs = search_and_create_performer_songs(performer)
+        self.assertEqual(len(songs), 1)
+        self.assertEqual(songs[0].title, "Hold me tight - Official MV 2024")
+
+    @patch("commons.youtube_search.YouTubeSearcher.search_most_popular_videos")
+    def test_correct_song_created_when_channel_matches(self, mock_search: MagicMock) -> None:
+        """A song is stored when channel name matches even if title doesn't start with performer."""
+        performer = _create_performer("Hold me tight")
+        mock_search.return_value = [
+            {
+                "video_id": "hmt_live",
+                "title": "Live at Shinjuku 2024 - Hold me tight",
+                "channel_name": "Hold me tight",
+                "channel_id": "UC_HMT",
+                "youtube_url": "https://www.youtube.com/watch?v=hmt_live",
+                "view_count": 5_000,
+                "duration_seconds": 300,
+            }
+        ]
+        songs = search_and_create_performer_songs(performer)
+        self.assertEqual(len(songs), 1)
+        self.assertEqual(songs[0].title, "Live at Shinjuku 2024 - Hold me tight")
+
+
 class TestParseDuration(TestCase):
     """Tests for YouTubeSearcher._parse_duration()."""
 

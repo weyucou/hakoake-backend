@@ -123,9 +123,12 @@ class YouTubeSearcher:
         if re.match(artist_prefix_pattern, title_lower):
             return True
 
-        # Check for "[Artist]" or "(Artist)" patterns often used in titles
-        bracketed_pattern = rf"[\[\(【「『]{re.escape(performer_lower)}[\]\)】」』]"
-        return bool(re.search(bracketed_pattern, title_lower))
+        # Check for "[Artist]" or "(Artist)" patterns at the START of the title only.
+        # Using re.match (not re.search) prevents false positives where the performer
+        # name appears as a parenthesised song-title translation mid-title, e.g.
+        # "BTS - 잡아줘 (Hold Me Tight)" matching performer "Hold me tight".
+        bracketed_at_start = rf"^[\[\(【「『]{re.escape(performer_lower)}[\]\)】」』]"
+        return bool(re.match(bracketed_at_start, title_lower))
 
     def _extract_video_data_from_html(self, html_content: str) -> list[dict]:  # noqa: C901, PLR0912
         """
@@ -365,10 +368,29 @@ def search_and_create_performer_songs(performer: "Performer") -> list["Performer
 
     for video_data in videos_data:
         try:
+            video_title = video_data["title"]
+            title_lower = video_title.lower()
+            performer_lower = performer.name.lower().strip()
+            video_channel = video_data.get("channel_name", "")
+
+            # Gate song creation: require either the title to start with the performer
+            # name (strong "Artist - Song" signal) or the channel to match.
+            # Without this, searches for performer names like "Dope Flamingo" or
+            # "Hold me tight" pull in BTS / Bruno Mars videos whose titles happen to
+            # contain those words as song-title keywords.
+            if not title_lower.startswith(performer_lower) and not channel_name_matches(performer.name, video_channel):
+                logger.info(
+                    "Skipping '%s' for %s: title does not start with performer name and channel '%s' does not match",
+                    video_title,
+                    performer.name,
+                    video_channel,
+                )
+                continue
+
             # Create PerformerSong instance
             song = PerformerSong.objects.create(
                 performer=performer,
-                title=video_data["title"],
+                title=video_title,
                 duration=timedelta(seconds=video_data["duration_seconds"]),
                 youtube_video_id=video_data["video_id"],
                 youtube_url=video_data["youtube_url"],
