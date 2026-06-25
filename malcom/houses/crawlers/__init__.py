@@ -13,6 +13,7 @@ from .cyclone import CycloneCrawler
 from .fever_popo import FeverPopoCrawler
 from .shibuya_o_nest import ShibuyaONestCrawler
 from .pit_zero import PitZeroCrawler
+from .club_quattro import ClubQuattroCrawler
 
 __all__ = [
     "LiveHouseWebsiteCrawler",
@@ -31,4 +32,5 @@ __all__ = [
     "FeverPopoCrawler",
     "ShibuyaONestCrawler",
     "PitZeroCrawler",
+    "ClubQuattroCrawler",
 ]
