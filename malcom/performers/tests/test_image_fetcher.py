@@ -54,6 +54,19 @@ class PerformerImageFetcherTestCase(TestCase):
         self.assertEqual(result, {})
 
     @patch("performers.image_fetcher.requests.Session.get")
+    def test_search_theaudiodb_uses_current_free_key(self, mock_get: MagicMock) -> None:
+        """TheAudioDB retired the "2" test key (404 on every search); the free key is "123"."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"artists": None}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        self.fetcher.search_theaudiodb("Coldplay")
+
+        url = mock_get.call_args.args[0]
+        self.assertEqual(url, "https://www.theaudiodb.com/api/v1/json/123/search.php")
+
+    @patch("performers.image_fetcher.requests.Session.get")
     def test_download_image_content_success(self, mock_get: MagicMock) -> None:
         """Test successful image download."""
         # Mock image content

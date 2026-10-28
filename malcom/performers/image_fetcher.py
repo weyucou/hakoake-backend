@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 class PerformerImageFetcher:
     """Fetches performer images and logos from TheAudioDB API with MusicBrainz fallback."""
 
-    # TheAudioDB API (free tier)
-    TADB_API_KEY = "2"  # Public test key
+    # TheAudioDB API (free tier): https://www.theaudiodb.com/free_music_api
+    # The old "2" test key returns 404 on every search since 2026-09-25
+    TADB_API_KEY = "123"
     TADB_SEARCH_URL = "https://www.theaudiodb.com/api/v1/json/{api_key}/search.php"
 
     # MusicBrainz API
