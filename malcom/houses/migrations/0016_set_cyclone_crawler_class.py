@@ -3,12 +3,12 @@ from django.db import migrations
 
 def set_cyclone_crawler_class(apps, schema_editor):
     LiveHouseWebsite = apps.get_model("houses", "LiveHouseWebsite")
-    LiveHouseWebsite.objects.filter(id=11).update(crawler_class="CycloneCrawler")
+    LiveHouseWebsite.objects.filter(url="http://www.cyclone1997.com/home.html").update(crawler_class="CycloneCrawler")
 
 
 def reverse_cyclone_crawler_class(apps, schema_editor):
     LiveHouseWebsite = apps.get_model("houses", "LiveHouseWebsite")
-    LiveHouseWebsite.objects.filter(id=11, crawler_class="CycloneCrawler").update(
+    LiveHouseWebsite.objects.filter(url="http://www.cyclone1997.com/home.html", crawler_class="CycloneCrawler").update(
         crawler_class="LiveHouseWebsiteCrawler"
     )
 

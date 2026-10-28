@@ -3,7 +3,7 @@ from django.db import migrations
 
 def set_seventh_floor_crawler_class(apps, schema_editor):
     LiveHouseWebsite = apps.get_model("houses", "LiveHouseWebsite")
-    LiveHouseWebsite.objects.filter(id=8).update(
+    LiveHouseWebsite.objects.filter(url="http://7th-floor.net/").update(
         crawler_class="SeventhFloorCrawler",
         schedule_url="http://7th-floor.net/event/",
     )
@@ -11,7 +11,7 @@ def set_seventh_floor_crawler_class(apps, schema_editor):
 
 def reverse_seventh_floor_crawler_class(apps, schema_editor):
     LiveHouseWebsite = apps.get_model("houses", "LiveHouseWebsite")
-    LiveHouseWebsite.objects.filter(id=8, crawler_class="SeventhFloorCrawler").update(
+    LiveHouseWebsite.objects.filter(url="http://7th-floor.net/", crawler_class="SeventhFloorCrawler").update(
         crawler_class="LiveHouseWebsiteCrawler",
         schedule_url="http://7th-floor.net/schedules/",
     )
