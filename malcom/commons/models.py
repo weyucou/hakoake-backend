@@ -1,5 +1,17 @@
 from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy as _
+
+NAME_READING_FIELDS = ("name_kana", "name_romaji")
+
+
+def blank_name_reading_errors(instance: models.Model) -> dict:
+    """Return a ValidationError message dict for each blank name_kana / name_romaji field."""
+    return {
+        field: _("This field must not be blank.")
+        for field in NAME_READING_FIELDS
+        if not (getattr(instance, field) or "").strip()
+    }
 
 
 class TimestampedModel(models.Model):

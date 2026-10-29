@@ -1,4 +1,5 @@
-from commons.models import TimestampedModel
+from commons.models import TimestampedModel, blank_name_reading_errors
+from django.core.exceptions import ValidationError
 from django.db import models
 from performers.models import Performer
 
@@ -33,6 +34,11 @@ class LiveHouse(TimestampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+    def clean(self) -> None:
+        super().clean()
+        if errors := blank_name_reading_errors(self):
+            raise ValidationError(errors)
 
     class Meta:
         verbose_name = "Live House"

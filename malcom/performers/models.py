@@ -1,6 +1,6 @@
 import re
 
-from commons.models import TimestampedModel
+from commons.models import TimestampedModel, blank_name_reading_errors
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -152,6 +152,9 @@ class Performer(TimestampedModel):
                     )
                 }
             )
+
+        if errors := blank_name_reading_errors(self):
+            raise ValidationError(errors)
 
         # Note: We can't validate social links here because they might not exist yet
         # This validation will be done in the save method or separately
